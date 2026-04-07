@@ -272,6 +272,6 @@ if [ "$MODE" = "image" ]; then
     cat <<EOF
   diskutil list
   diskutil unmountDisk /dev/diskX
-  sudo dd if=$TARGET of=/dev/rdiskX bs=4m
+  sudo dd if=$TARGET of=/dev/rdiskX bs=4m status=progress
 EOF
 fi

@@ -76,7 +76,7 @@ docker run --rm -it --privileged \
 # Then flash from macOS using dd:
 diskutil list
 diskutil unmountDisk /dev/diskX
-sudo dd if=output/surface2-installer.img of=/dev/rdiskX bs=4m
+sudo dd if=output/surface2-installer.img of=/dev/rdiskX bs=4m status=progress
 ```
 
 Or on Windows, use [Rufus](https://rufus.ie/) or [balenaEtcher](https://www.balena.io/etcher/) to flash the `.img` file.
