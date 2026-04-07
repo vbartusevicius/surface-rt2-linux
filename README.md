@@ -50,30 +50,54 @@ This produces:
 
 ## Step 3 — Prepare USB
 
-**On Linux / macOS (native):**
+The `prepare-usb.sh` script supports two modes:
+
+| Mode | Command | Use case |
+|------|---------|----------|
+| **Block device** (Linux) | `sudo ./scripts/prepare-usb.sh /dev/sdX` | Direct USB write on Linux |
+| **Image file** (macOS-friendly) | `./scripts/prepare-usb.sh ./output/surface2-installer.img` | Create `.img` to flash later |
+
+### Linux — Direct USB write
 
 ```bash
 sudo ./scripts/prepare-usb.sh /dev/sdX
 ```
 
-**Via Docker** (no host tools needed — Linux/macOS only):
+### macOS / Windows — Create image, then flash
+
+Use Docker to build the image (no native tools needed):
 
 ```bash
 docker run --rm -it --privileged \
   -v "$PWD/output:/work/output" \
   surface2-build \
-  bash scripts/prepare-usb.sh /dev/sdX
+  bash /work/scripts/prepare-usb.sh /work/output/surface2-installer.img
+
+# Then flash from macOS using dd:
+diskutil list
+diskutil unmountDisk /dev/diskX
+sudo dd if=output/surface2-installer.img of=/dev/rdiskX bs=4m
 ```
 
-This single command:
+Or on Windows, use [Rufus](https://rufus.ie/) or [balenaEtcher](https://www.balena.io/etcher/) to flash the `.img` file.
+
+### What the script does
+
 1. Downloads [Raspberry Pi OS Lite (Bookworm armhf)](https://www.raspberrypi.com/software/operating-systems/) if needed
 2. Extracts the root partition into `rootfs.img`
-3. Formats the USB as FAT32 (labeled `S2LINUX`)
+3. Formats the target (USB or image) as FAT32 (labeled `S2LINUX`)
 4. Copies boot files, kernel modules, firmware, and rootfs.img
 
 The download is cached in `output/` — subsequent runs skip it.
 To use your own rootfs image instead, pass it as the second argument:
-`sudo ./scripts/prepare-usb.sh /dev/sdX path/to/rootfs.img`
+
+```bash
+# Linux direct write with custom rootfs:
+sudo ./scripts/prepare-usb.sh /dev/sdX path/to/rootfs.img
+
+# Image mode with custom rootfs:
+./scripts/prepare-usb.sh ./output/surface2-installer.img path/to/rootfs.img
+```
 
 **USB drive layout after preparation:**
 
