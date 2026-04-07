@@ -6,9 +6,9 @@
 set -eu
 
 # ─── Configuration ──────────────────────────────────────────────────
-STAGE_PART="/dev/mmcblk0p6"   # Staging partition (FAT32 with rootfs.img)
 ROOT_PART="/dev/mmcblk0p5"    # Target Linux root partition
 ROOTFS_IMG="rootfs.img"       # Name of the rootfs image on staging
+USB_LABEL="S2LINUX"           # FAT32 label set by prepare-usb.sh
 STAGE_MNT="/mnt/stage"
 ROOT_MNT="/mnt/root"
 
@@ -29,13 +29,35 @@ mount -t devpts   devpts   /dev/pts
 # Wait for eMMC to appear
 msg "Waiting for eMMC ..."
 RETRY=30
-while [ ! -b "$STAGE_PART" ] && [ "$RETRY" -gt 0 ]; do
+while [ ! -b "$ROOT_PART" ] && [ "$RETRY" -gt 0 ]; do
     sleep 1
     RETRY=$((RETRY - 1))
 done
+[ -b "$ROOT_PART" ] || fail "Root partition $ROOT_PART not found after 30s"
 
-[ -b "$STAGE_PART" ] || fail "Staging partition $STAGE_PART not found after 30s"
-[ -b "$ROOT_PART" ]  || fail "Root partition $ROOT_PART not found"
+# ─── Find staging source ────────────────────────────────────────
+# Try USB drive (S2LINUX label from prepare-usb.sh) first, then eMMC p6
+msg "Looking for staging source ..."
+sleep 2  # give USB time to enumerate
+
+STAGE_PART=""
+for dev in /dev/sd[a-z]1 /dev/sd[a-z]2; do
+    [ -b "$dev" ] || continue
+    if blkid "$dev" 2>/dev/null | grep -q "LABEL=\"$USB_LABEL\""; then
+        STAGE_PART="$dev"
+        msg "Found USB staging: $dev (label=$USB_LABEL)"
+        break
+    fi
+done
+
+if [ -z "$STAGE_PART" ]; then
+    if [ -b "/dev/mmcblk0p6" ]; then
+        STAGE_PART="/dev/mmcblk0p6"
+        msg "Using eMMC staging: $STAGE_PART"
+    else
+        fail "No staging source found (no USB with $USB_LABEL label, no /dev/mmcblk0p6)"
+    fi
+fi
 
 # ─── Safety checks ────────────────────────────────────────────────
 # Refuse to write to EFI (p1), Windows (p2), or recovery (p3/p4)

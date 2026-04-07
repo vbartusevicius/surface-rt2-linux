@@ -11,7 +11,7 @@ This repository follows the guide written by [Andrew Lee](https://www.andrewjame
 ## Prerequisites
 
 - **Jailbroken Surface 2** — Secure Boot disabled (GoldenKeys + Yahallo)
-- **Host PC** — macOS or Linux x86_64, with [Docker](https://www.docker.com/) installed
+- **Host PC** — Windows (WSL), macOS, or Linux x86_64, with [Docker](https://www.docker.com/) installed
 - **USB drive** ≥ 8 GB (FAT32)
 
 ## Step 1 — Partition the eMMC (on Windows RT)
@@ -23,7 +23,7 @@ Open Disk Management on the Surface 2 (`Win+X` → Disk Management):
 | p1 | ~350 MB | FAT32 | EFI System Partition (keep) |
 | p2 | ~16 GB | NTFS | Windows RT (shrink) |
 | p5 | ~6 GB | ext4 | Linux root `/` |
-| p6 | ~5 GB | FAT32 | Staging (installer files) |
+| p6 | ~5 GB | FAT32 | Staging (optional — only if not using USB) |
 
 Delete the recovery partition (p3) to free space.
 
@@ -37,47 +37,101 @@ cd surface-rt2-linux
 docker build -t surface2-build .
 
 # Compile kernel + DTB + initramfs
-docker run --rm -v "$PWD:/work" surface2-build /work/scripts/build.sh
+mkdir -p output
+docker run --rm -v "$PWD/output:/work/output" surface2-build
 ```
 
+The Dockerfile copies the project files into the image and runs `scripts/build.sh` automatically.
+All kernel config options live in a single file: `configs/surface2_defconfig_fragment`.
+
 This produces:
-- `output/boot/` — `boot.efi`, `surface2-custom.dtb`, `initrd.gz`, `startup.nsh`
+- `output/boot/` — `boot.efi`, `*.dtb`, `initrd.gz`, `startup.nsh`
 - `output/staging/` — kernel modules + Marvell Wi-Fi firmware
 
-## Step 3 — Prepare USB + staging
+## Step 3 — Prepare USB
 
-1. Format USB as **FAT32**
-2. Copy everything from `output/boot/` to the USB root
-3. Copy `output/staging/*` to Surface 2 **partition 6**
-4. Place a root filesystem image on partition 6, named `rootfs.img` (raw ext4 image).
-   Example — Raspberry Pi OS Lite armhf from [raspberrypi.com/software](https://www.raspberrypi.com/software/operating-systems/):
-   ```bash
-   xz -d 2024-*-raspios-bookworm-armhf-lite.img.xz
-   # Extract the root partition (usually partition 2) from the .img:
-   OFFSET=$(fdisk -l *.img | awk '/Linux/ {print $2}')
-   dd if=*.img of=rootfs.img bs=512 skip=$OFFSET count=$(fdisk -l *.img | awk '/Linux/ {print $4}')
-   ```
+**On Linux / macOS (native):**
+
+```bash
+sudo ./scripts/prepare-usb.sh /dev/sdX
+```
+
+**Via Docker** (no host tools needed — Linux/macOS only):
+
+```bash
+docker run --rm -it --privileged \
+  -v "$PWD/output:/work/output" \
+  surface2-build \
+  bash scripts/prepare-usb.sh /dev/sdX
+```
+
+This single command:
+1. Downloads [Raspberry Pi OS Lite (Bookworm armhf)](https://www.raspberrypi.com/software/operating-systems/) if needed
+2. Extracts the root partition into `rootfs.img`
+3. Formats the USB as FAT32 (labeled `S2LINUX`)
+4. Copies boot files, kernel modules, firmware, and rootfs.img
+
+The download is cached in `output/` — subsequent runs skip it.
+To use your own rootfs image instead, pass it as the second argument:
+`sudo ./scripts/prepare-usb.sh /dev/sdX path/to/rootfs.img`
+
+**USB drive layout after preparation:**
+
+```
+S2LINUX (FAT32):
+├── boot.efi              ← kernel (zImage as EFI binary)
+├── initrd.gz             ← initramfs containing the installer
+├── startup.nsh           ← EFI Shell script: boots installer
+├── startup-emmc.nsh      ← EFI Shell script: boots from eMMC (use after install)
+├── *.dtb                 ← device tree blobs for Tegra 114
+├── rootfs.img            ← root filesystem (Raspberry Pi OS)
+├── EFI/BOOT/BOOTARM.EFI  ← EFI fallback boot path (copy of boot.efi)
+└── lib/
+    ├── modules/          ← kernel modules
+    └── firmware/mrvl/    ← Marvell Wi-Fi firmware
+```
 
 ## Step 4 — Boot & install
 
 1. Plug USB into Surface 2
 2. Power on holding **Volume Up** → UEFI boot menu → select USB
-3. The initramfs installer (`init.sh`) runs automatically:
+3. The EFI Shell runs `startup.nsh` from the USB root, which loads `boot.efi` + `initrd.gz`
+4. The initramfs installer (`init.sh`) runs automatically:
+   - Detects the USB by its `S2LINUX` label (or falls back to eMMC partition 6)
    - Writes `rootfs.img` → partition 5 (ext4)
-   - Copies modules + firmware
-   - Writes `/etc/fstab`
-   - Reboots
+   - Copies kernel modules + firmware into the new root
+   - Writes `/etc/fstab` and reboots
 
-## Step 5 — Boot from eMMC
+## Step 5 — Switch to eMMC boot
 
-After install, switch `startup.nsh` on the EFI partition to:
+After the installer finishes, the USB still has `startup.nsh` in installer mode.
+To boot the installed system from eMMC, **edit `startup.nsh` on the USB**:
 
+1. Mount the USB on any PC
+2. Replace `startup.nsh` with the post-install version:
+   ```bash
+   # On Linux:
+   cp /mnt/usb/startup-emmc.nsh /mnt/usb/startup.nsh
+   ```
+   Or on Windows/macOS, rename `startup-emmc.nsh` → `startup.nsh` (overwrite the old one).
+
+The two startup scripts differ in boot target:
+
+| File | Boots | Kernel cmdline |
+|------|-------|---------------|
+| `startup.nsh` (default) | Installer initramfs | `root=/dev/ram0 init=/init` |
+| `startup-emmc.nsh` | eMMC partition 5 | `root=/dev/mmcblk0p5 rootfstype=ext4 rootwait` |
+
+**To boot permanently without USB**, copy the boot files to the EFI System Partition (p1):
+
+```bash
+# On the Surface 2 running Linux, or from Windows RT:
+mount /dev/mmcblk0p1 /mnt/efi
+cp /mnt/usb/boot.efi /mnt/efi/
+cp /mnt/usb/*.dtb /mnt/efi/
+cp /mnt/usb/startup-emmc.nsh /mnt/efi/startup.nsh
+umount /mnt/efi
 ```
-fs0:
-\boot.efi dtb=\surface2-custom.dtb root=/dev/mmcblk0p5 rootfstype=ext4 rootwait console=tty0
-```
-
-Or copy boot files directly to the EFI System Partition to boot without USB.
 
 ## Step 6 — Verify
 
@@ -97,27 +151,7 @@ cat /sys/class/power_supply/*/uevent
 | No touch | Verify I2C1 HID node in DTS; try `atmel_mxt_ts` driver |
 | USB flaky | Known ACPI issue — USB2/USB3 use HSIC, see hardware analysis |
 | Kernel panic | Check `root=` partition number, verify ext4 on p5 |
-
-## Project structure
-
-```
-surface-rt2-linux/
-├── README.md                       # This file — quick start
-├── Dockerfile                      # ARM cross-compilation container
-├── docs/
-│   └── hardware-analysis.md        # Full DSDT/SSDT analysis & hardware map
-├── scripts/
-│   ├── build.sh                    # Build kernel + DTB + initramfs
-│   ├── init.sh                     # Initramfs installer (runs on device)
-│   ├── prepare-usb.sh              # Format & populate USB drive
-│   ├── winrt-device-discovery.ps1  # WinRT device enumeration
-│   └── winrt-devinfo.bat           # WinRT driver dump (batch)
-├── configs/
-│   ├── surface2_defconfig_fragment # Kernel config additions
-│   └── kernel-options.txt          # CONFIG_* checklist
-└── dts/
-    └── tegra114-surface2.dts       # Device tree template
-```
+| Re-runs installer on reboot | Replace `startup.nsh` with `startup-emmc.nsh` on USB (see Step 5) |
 
 ## Resources
 

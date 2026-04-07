@@ -1,5 +1,6 @@
 # Build artifacts
-output/
+output/*
+!output/.gitkeep
 linux/
 .initramfs/
 

@@ -29,6 +29,7 @@ CONFIG_CFG80211=y
 CONFIG_MAC80211=y
 CONFIG_MWIFIEX=m
 CONFIG_MWIFIEX_SDIO=m
+# Firmware: /lib/firmware/mrvl/sd8797_uapsta.bin
 
 # ─── Bluetooth (Marvell combo chip) ───────────────────────────────
 CONFIG_BT=m
@@ -152,3 +153,18 @@ CONFIG_MODULE_UNLOAD=y
 CONFIG_FW_LOADER=y
 CONFIG_EXTRA_FIRMWARE=""
 CONFIG_EXTRA_FIRMWARE_DIR="/lib/firmware"
+
+# ═══════════════════════════════════════════════════════════════════
+# 3D GPU (optional — grate driver user-space stack)
+# ═══════════════════════════════════════════════════════════════════
+# CONFIG_DRM_TEGRA=y            # Already set in Display section
+# User-space: libdrm-opentegra + mesa (tegra gallium) + libvdpau-tegra
+# See: https://github.com/grate-driver
+
+# ═══════════════════════════════════════════════════════════════════
+# CAMERA (not yet supported — sensor model unknown)
+# ═══════════════════════════════════════════════════════════════════
+# Found in SSDT: CAM0 on I2C5 @ 0x12, GPIOs BB3/BB7/R4/EE1/S1
+# CONFIG_MEDIA_SUPPORT=y        # Enable when camera sensor is identified
+# CONFIG_VIDEO_V4L2=y
+# CONFIG_VIDEO_TEGRA=y          # Tegra VI (Video Input)

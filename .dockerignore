@@ -1,0 +1,9 @@
+output/
+linux/
+.initramfs/
+.git/
+resources/
+*.txt
+*.md
+.vscode/
+.idea/
