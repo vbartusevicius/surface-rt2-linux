@@ -54,13 +54,14 @@ download_rootfs() {
 
     # Extract root partition (partition 2 = Linux ext4)
     info "Extracting root partition from $(basename "$IMG_FILE") ..."
-    local PART_INFO
-    PART_INFO=$(fdisk -l "$IMG_FILE" | grep 'Linux' | head -1)
-    [ -n "$PART_INFO" ] || error "Cannot find Linux partition in $IMG_FILE"
+    # parted -ms output: "2:START:END:SIZE:ext4::;" — use partition 2 (Linux root)
+    local PLINE
+    PLINE=$(parted -ms "$IMG_FILE" unit s print 2>/dev/null | grep "^2:")
+    [ -n "$PLINE" ] || error "Cannot find partition 2 in $IMG_FILE"
 
     local START SIZE
-    START=$(echo "$PART_INFO" | awk '{print $2}')
-    SIZE=$(echo "$PART_INFO" | awk '{print $4}')
+    START=$(echo "$PLINE" | cut -d: -f2 | tr -d 's')
+    SIZE=$(echo "$PLINE" | cut -d: -f4 | tr -d 's')
     dd if="$IMG_FILE" of="$ROOTFS_OUT" bs=512 skip="$START" count="$SIZE" status=progress
     sync
 
@@ -125,17 +126,34 @@ umount "${USB_DEV}"* 2>/dev/null || true
 parted -s "$USB_DEV" \
     mklabel gpt \
     mkpart "EFI" fat32 1MiB 100%
-partprobe "$USB_DEV" 2>/dev/null || sleep 2
+partprobe "$USB_DEV" 2>/dev/null || true
+blockdev --rereadpt "$USB_DEV" 2>/dev/null || true
+sleep 1
 
-# Detect partition name (could be /dev/sdX1 or /dev/sdXp1)
-PART=""
-for suffix in "1" "p1"; do
-    if [ -b "${USB_DEV}${suffix}" ]; then
-        PART="${USB_DEV}${suffix}"
-        break
-    fi
-done
-[ -n "$PART" ] || error "Cannot find partition on $USB_DEV"
+# For loop devices in Docker: re-attach with --partscan if partition not found
+_find_part() {
+    for suffix in "p1" "1"; do
+        if [ -b "${USB_DEV}${suffix}" ]; then echo "${USB_DEV}${suffix}"; return 0; fi
+    done
+    return 0
+}
+
+if echo "$USB_DEV" | grep -q "^/dev/loop"; then
+    # Loop devices: partition sub-devices are unreliable in containers.
+    # Map the partition directly using offset from parted.
+    info "Mapping loop partition via offset ..."
+    BACKING=$(losetup -nO BACK-FILE "$USB_DEV" | tr -d ' ')
+    # parted -ms output: "1:2048s:1046527s:1044480s:fat32:EFI:;"
+    PLINE=$(parted -ms "$USB_DEV" unit s print 2>/dev/null | grep "^1:")
+    [ -n "$PLINE" ] || error "Cannot find partition 1 in parted output"
+    P_START=$(echo "$PLINE" | cut -d: -f2 | tr -d 's')
+    P_SIZE=$(echo "$PLINE" | cut -d: -f4 | tr -d 's')
+    PART=$(losetup --show -f --offset $((P_START * 512)) --sizelimit $((P_SIZE * 512)) "$BACKING")
+    info "Partition mapped to $PART"
+else
+    PART=$(_find_part)
+    [ -n "$PART" ] || error "Cannot find partition on $USB_DEV"
+fi
 
 # ─── Format ─────────────────────────────────────────────────────────
 info "Formatting $PART as FAT32 (label=$USB_LABEL) ..."
@@ -163,11 +181,25 @@ done
 mkdir -p "$MNT/EFI/BOOT"
 cp "$BOOT_DIR/boot.efi" "$MNT/EFI/BOOT/BOOTARM.EFI"
 
-info "Copying kernel modules and firmware ..."
-if [ -d "$STAGING_DIR/lib" ]; then
-    cp -a "$STAGING_DIR/lib" "$MNT/"
+info "Copying kernel modules ..."
+if [ -d "$STAGING_DIR/lib/modules" ]; then
+    mkdir -p "$MNT/lib/modules"
+    # Copy module files only — skip source/build symlinks (not needed on target)
+    for modver in "$STAGING_DIR"/lib/modules/*/; do
+        dest="$MNT/lib/modules/$(basename "$modver")"
+        mkdir -p "$dest"
+        find "$modver" -mindepth 1 -maxdepth 1 ! -type l -exec cp -r {} "$dest/" \;
+    done
 else
-    warn "No staging lib/ found — modules and firmware will be missing"
+    warn "No modules found in $STAGING_DIR/lib/modules"
+fi
+
+info "Copying Wi-Fi firmware ..."
+if [ -d "$STAGING_DIR/lib/firmware" ]; then
+    mkdir -p "$MNT/lib/firmware"
+    cp -r "$STAGING_DIR/lib/firmware"/* "$MNT/lib/firmware/"
+else
+    warn "No firmware found in $STAGING_DIR/lib/firmware"
 fi
 
 if [ -n "$ROOTFS_IMG" ]; then

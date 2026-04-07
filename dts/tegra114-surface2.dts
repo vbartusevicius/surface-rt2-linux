@@ -1,338 +1,795 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
- * tegra114-surface2.dts — Device tree for Microsoft Surface 2 (Tegra 4 / T114)
+ * tegra114-surface2.dts -- Device tree for Microsoft Surface 2 (Tegra 4 / T114)
  *
- * This is a TEMPLATE based on analysis of the Surface 2 DSDT, Open-RT
- * community work, and Andrew Lee's device-tree efforts.
+ * Merged from three sources:
+ *   1. Andrew Lee / Open-Surface-RT grate-linux DTS  (tested, boots)
+ *   2. grate-linux EFI variant DTS                   (WiFi, cover, touch)
+ *   3. Live Windows RT registry data                 (ground-truth addresses)
  *
- * Base: tegra114-microsoft-surface-2-all.dtb from Andrew Lee's repo.
- * Convert Andrew's DTB to DTS, merge with this, then compile:
- *   dtc -I dtb -O dts -o base.dts tegra114-microsoft-surface-2-all.dtb
- *   # merge nodes from this file into base.dts
- *   dtc -I dts -O dtb -o surface2-custom.dtb merged.dts
+ * Compile via kernel build system:
+ *   cp dts/tegra114-surface2.dts $KERNEL/arch/arm/boot/dts/
+ *   make tegra114-surface2.dtb
  *
- * IMPORTANT: This file documents the known hardware layout.
- * Actual register addresses and interrupt numbers must be verified
- * against the real DTB and kernel source.
+ * CONFLICTS between sources are documented inline.  Where Andrew's values
+ * are tested-working they are kept; registry data is noted as TODO.
  */
 
 /dts-v1/;
 
 #include "tegra114.dtsi"
+#include <dt-bindings/input/input.h>
 
 / {
 	model = "Microsoft Surface 2";
-	compatible = "microsoft,surface-2", "nvidia,tegra114";
+	compatible = "microsoft,surface-2-efi", "microsoft,surface-2", "nvidia,tegra114";
 
 	aliases {
-		serial0 = &uarta;
+		mmc0 = &sdmmc4; /* eMMC */
+		mmc1 = &sdmmc3; /* SD card slot (disabled -- UART pin conflict) */
+		mmc2 = &sdmmc1; /* WiFi (Marvell 88W8797) */
+
+		rtc0 = &palmas;
+		rtc1 = "/rtc@7000e000";
+
+		serial0 = &uarta; /* debug console */
 	};
 
 	chosen {
 		stdout-path = "serial0:115200n8";
 	};
 
-	memory@80000000 {
-		device_type = "memory";
-		reg = <0x80000000 0x80000000>; /* 2 GB */
+	/* --- Display (Samsung LTL106HL02, 1920x1080, DSI) --------------- */
+	/* REGISTRY: NVDA0205 GPU at 0x50000000 */
+	host1x@50000000 {
+		dsi@54300000 {
+			status = "okay";
+
+			panel@0 {
+				compatible = "samsung,106hl02";
+				reg = <0>;
+				backlight = <&backlight>;
+				/* Power supply unclear -- Andrew notes FET4 needed
+				 * but regulator connection TBD */
+			};
+		};
+
+		/* HDMI video output -- micro-HDMI port
+		 * REGISTRY: NVDA010F HDA at 0x70030000 (audio side enabled below)
+		 * TODO: Verify HPD (hot-plug detect) GPIO and supply rails.
+		 * tegra114.dtsi defines hdmi@54280000; enable when tested:
+		 *
+		 * hdmi@54280000 {
+		 *     status = "okay";
+		 *     nvidia,ddc-i2c-bus = <&hdmi_ddc>;
+		 *     nvidia,hpd-gpio = <&gpio TEGRA_GPIO(N, 7) GPIO_ACTIVE_HIGH>;
+		 *     // hdmi-supply, pll-supply, vdd-supply TBD
+		 * };
+		 */
 	};
 
-	clk32k_in: clock-32k {
+	/* --- Pinmux ----------------------------------------------------- */
+	/* Source: Andrew (tested) */
+	pinmux@70000868 {
+		pinctrl-names = "default";
+		pinctrl-0 = <&state_default>;
+
+		state_default: pinmux {
+			/* UART-A RX (debug console) */
+			sdmmc3_cmd_pa7 {
+				nvidia,pins = "sdmmc3_cmd_pa7";
+				nvidia,function = "uarta";
+				nvidia,pull = <TEGRA_PIN_PULL_DOWN>;
+				nvidia,tristate = <TEGRA_PIN_ENABLE>;
+				nvidia,enable-input = <TEGRA_PIN_ENABLE>;
+			};
+
+			/* UART-A TX (debug console) */
+			sdmmc3_dat1_pb6 {
+				nvidia,pins = "sdmmc3_dat1_pb6";
+				nvidia,function = "uarta";
+				nvidia,pull = <TEGRA_PIN_PULL_NONE>;
+				nvidia,tristate = <TEGRA_PIN_DISABLE>;
+				nvidia,enable-input = <TEGRA_PIN_DISABLE>;
+			};
+
+			/* PWM backlight */
+			panel-backlight {
+				nvidia,pins = "gmi_ad8_ph0";
+				nvidia,function = "pwm0";
+				nvidia,pull = <TEGRA_PIN_PULL_NONE>;
+				nvidia,tristate = <TEGRA_PIN_DISABLE>;
+				nvidia,enable-input = <TEGRA_PIN_DISABLE>;
+			};
+		};
+	};
+
+	/* --- UART-A (debug console) ------------------------------------- */
+	/* REGISTRY: NVDA0100\0 at 0x70006000 */
+	serial@70006000 {
+		status = "okay";
+	};
+
+	/* --- UART-C (Bluetooth) ----------------------------------------- */
+	/* REGISTRY: NVDA0100\2 at 0x70006200
+	 * Bluetooth: NVDAF000 Marvell AVASTAR, WinRT: mbtu97w8
+	 * Linux: CONFIG_BT_HCIUART_MARVELL + CONFIG_SERIAL_DEV_BUS
+	 * Firmware: /lib/firmware/mrvl/sd8797_uapsta.bin (shared with WiFi)
+	 * NOTE: Not in Andrew's DTS -- added from registry data. */
+	serial@70006200 {
+		status = "okay";
+
+		bluetooth {
+			compatible = "mrvl,88w8797";
+			/* TODO: verify exact DT compatible for UART BT.
+			 * May need max-speed = <3000000>; */
+		};
+	};
+
+	/* UART-B (0x70006040) and UART-E (0x70006400) NOT enumerated
+	 * on live system -- left disabled (tegra114.dtsi default) */
+
+	/* --- PWM -------------------------------------------------------- */
+	pwm@7000a000 {
+		status = "okay";
+	};
+
+	/* --- I2C1: Sensor Hub (+ Touch/Cover via hotplug) --------------- */
+	/* REGISTRY: NVDA0101\1 at 0x7000C000, IRQ 70 */
+	i2c@7000c000 {
+		status = "okay";
+		clock-frequency = <400000>;
+
+		/* Sensor hub / HID collection at 0x28
+		 * Source: Andrew (tested, works)
+		 * CONFLICT: Registry says MSHW0102 sensor hub is at 0x3D.
+		 *   Andrew's 0x28 boots and works -- keep it.
+		 *   The 0x28 may be a shared HID collection address.
+		 *   Try changing to 0x3D if sensor data is wrong.
+		 * REGISTRY also shows MSHW0100 touch at 0x3B on I2C1.
+		 *   Andrew puts touch on I2C2 instead (see below). */
+		sensor@28 {
+			compatible = "hid-over-i2c";
+			reg = <0x28>;
+			hid-descr-addr = <0x0001>;
+			interrupt-parent = <&gpio>;
+			interrupts = <TEGRA_GPIO(BB, 6) IRQ_TYPE_LEVEL_LOW>;
+		};
+	};
+
+	/* --- I2C2: Touchscreen ------------------------------------------ */
+	/* REGISTRY: NVDA0101\2 at 0x7000C400, IRQ 116
+	 * Source: Andrew EFI DTS -- touch at 0x4b on I2C2
+	 * Andrew's note: "Doesn't work for APX. Device doesn't show up
+	 *   at all or disconnects"
+	 * CONFLICT: Registry says MSHW0100 touch is at 0x3B on I2C1.
+	 *   Both addresses may be valid depending on boot mode (EFI vs APX).
+	 *   TODO: Test 0x3B on I2C1 if 0x4b on I2C2 doesn't work. */
+	i2c@7000c400 {
+		status = "okay";
+		clock-frequency = <100000>;
+
+		touchscreen@4b {
+			compatible = "hid-over-i2c";
+			reg = <0x4b>;
+			hid-descr-addr = <0x0000>;
+			interrupt-parent = <&gpio>;
+			interrupts = <TEGRA_GPIO(O, 6) IRQ_TYPE_LEVEL_LOW>;
+			/* vdd-supply = <&touchscreen_reg>; */
+		};
+	};
+
+	/* --- I2C3: Audio codec + Temperature sensor --------------------- */
+	/* REGISTRY: NVDA0101\3 at 0x7000C500, IRQ 124
+	 * Source: Andrew (tested) -- WM8962 confirmed on I2C3
+	 * NOTE: Our earlier docs wrongly said I2C2; corrected here. */
+	i2c@7000c500 {
+		status = "okay";
+		clock-frequency = <400000>;
+
+		wm8962: audio-codec@1a {
+			compatible = "wlf,wm8962";
+			reg = <0x1a>;
+			interrupt-parent = <&gpio>;
+			interrupts = <TEGRA_GPIO(X, 3) IRQ_TYPE_LEVEL_HIGH>;
+
+			DCVDD-supply = <&stub_audio_reg>;
+			DBVDD-supply = <&stub_audio_reg>;
+			AVDD-supply = <&stub_audio_reg>;
+			CPVDD-supply = <&stub_audio_reg>;
+			MICVDD-supply = <&stub_audio_reg>;
+			PLLVDD-supply = <&stub_audio_reg>;
+			SPKVDD1-supply = <&stub_audio_reg>;
+			SPKVDD2-supply = <&stub_audio_reg>;
+		};
+
+		/* External temp sensor -- used by thermal zones TZ03/TZ04
+		 * DSDT: DHTH method reads via I2C3 */
+		temperature-sensor@4c {
+			compatible = "onnn,nct1008";
+			reg = <0x4c>;
+			interrupt-parent = <&gpio>;
+			interrupts = <TEGRA_GPIO(V, 1) IRQ_TYPE_EDGE_FALLING>;
+		};
+	};
+
+	/* --- I2C4: HDMI DDC --------------------------------------------- */
+	/* REGISTRY: NVDA0101\4 at 0x7000C700, IRQ 152
+	 * Source: Andrew (tested) -- this is HDMI DDC, not "misc" */
+	hdmi_ddc: i2c@7000c700 {
+		status = "okay";
+		clock-frequency = <100000>;
+	};
+
+	/* --- I2C5: PMIC + Charger + Camera ------------------------------ */
+	/* REGISTRY: NVDA0101\5 at 0x7000D000, IRQ 85 */
+	i2c@7000d000 {
+		status = "okay";
+		clock-frequency = <1400000>;
+
+		/* TPS65090 -- Battery charger, DCDC, FET switches
+		 * Source: Andrew (tested) + registry confirmed @0x48 */
+		pmic@48 {
+			compatible = "ti,tps65090";
+			reg = <0x48>;
+
+			interrupt-parent = <&gpio>;
+			interrupts = <TEGRA_GPIO(S, 2) IRQ_TYPE_LEVEL_HIGH>;
+
+			vsys1-supply = <&vdd_ac_bat_reg>;
+			vsys2-supply = <&vdd_ac_bat_reg>;
+			vsys-l1-supply = <&vdd_ac_bat_reg>;
+			vsys-l2-supply = <&vdd_ac_bat_reg>;
+
+			infet6-supply = <&stub_sd_reg>;
+
+			charger {
+				compatible = "ti,tps65090-charger";
+				ti,enable-low-current-chrg;
+			};
+
+			regulators {
+				tps65090_dcdc1_reg: dcdc1 {
+					regulator-name = "vdd-sys-5v0";
+					regulator-min-microvolt = <5000000>;
+					regulator-max-microvolt = <5000000>;
+					ti,enable-ext-control;
+				};
+
+				tps65090_dcdc2_reg: dcdc2 {
+					regulator-name = "vdd-sys-3v3";
+					regulator-min-microvolt = <3300000>;
+					regulator-max-microvolt = <3300000>;
+					ti,enable-ext-control;
+				};
+
+				tps65090_dcdc3_reg: dcdc3 {
+					ti,enable-ext-control;
+				};
+
+				/* FET1: panel-related (Andrew) */
+				tps65090_fet1: fet1 {
+					regulator-name = "something-panel";
+					regulator-always-on;
+					regulator-boot-on;
+				};
+
+				/* FET2: HDMI/USB reverse-current protected */
+				tps65090_fet2: fet2 {
+					regulator-always-on;
+					regulator-boot-on;
+				};
+
+				/* FET4: panel-related (Andrew) */
+				tps65090_fet4: fet4 {
+					regulator-always-on;
+					regulator-boot-on;
+				};
+
+				/* FET5: crash if enabled -- PowerGood missing */
+
+				/* FET6: SD card power */
+				tps65090_fet6: fet6 {
+					regulator-name = "vdd-sd-slot";
+					regulator-always-on;
+				};
+
+				ldo1 {
+					regulator-name = "vdd-sby-5v0";
+					regulator-min-microvolt = <5000000>;
+					regulator-max-microvolt = <5000000>;
+					regulator-always-on;
+					regulator-boot-on;
+				};
+
+				ldo2 {
+					regulator-name = "vdd-sby-3v3";
+					regulator-min-microvolt = <3300000>;
+					regulator-max-microvolt = <3300000>;
+					regulator-always-on;
+					regulator-boot-on;
+				};
+			};
+		};
+
+		/* TPS65913 (Palmas) -- Main PMIC
+		 * Source: Andrew (tested) + registry NVDAF242 @0x58
+		 * Regulators: SMPS + LDO rails for CPU, core, I/O, camera */
+		palmas: pmic@58 {
+			compatible = "ti,palmas";
+			reg = <0x58>;
+			interrupts = <GIC_SPI 86 IRQ_TYPE_LEVEL_HIGH>;
+
+			#interrupt-cells = <2>;
+			interrupt-controller;
+
+			ti,system-power-controller;
+			ti,power-ctrl;
+
+			palmas_gpio: gpio {
+				compatible = "ti,palmas-gpio";
+				gpio-controller;
+				#gpio-cells = <2>;
+			};
+
+			palmas_clk32kgaudio@0 {
+				compatible = "ti,palmas-clk32kgaudio";
+				#clock-cells = <0>;
+			};
+
+			pmic {
+				compatible = "ti,tps65913-pmic", "ti,palmas-pmic";
+
+				ldo9-in-supply = <&stub_sd_reg>;
+				ldousb-in-supply = <&stub_audio_reg>;
+
+				regulators {
+					smps123 {
+						regulator-name = "vdd-cpu";
+						regulator-min-microvolt = <1100000>;
+						regulator-max-microvolt = <1100000>;
+						regulator-always-on;
+						regulator-boot-on;
+						ti,roof-floor = <1>;
+						ti,mode-sleep = <0>;
+						regulator-ramp-delay = <2500>;
+						ti,warm-reset;
+					};
+
+					smps457 {
+						regulator-name = "vdd-core";
+						regulator-min-microvolt = <1100000>;
+						regulator-max-microvolt = <1100000>;
+						regulator-always-on;
+						regulator-boot-on;
+						ti,roof-floor = <1>;
+						ti,mode-sleep = <0>;
+						regulator-ramp-delay = <5000>;
+						ti,warm-reset;
+					};
+
+					smps6 {
+						regulator-name = "dunno";
+						regulator-min-microvolt = <850000>;
+						regulator-max-microvolt = <850000>;
+						ti,roof-floor = <1>;
+						ti,mode-sleep = <0>;
+						regulator-ramp-delay = <5000>;
+						ti,warm-reset;
+					};
+
+					tps65913_smps8: smps8 {
+						regulator-name = "vdd-1v8";
+						regulator-min-microvolt = <1800000>;
+						regulator-max-microvolt = <1800000>;
+						regulator-always-on;
+						regulator-boot-on;
+						ti,roof-floor = <1>;
+						ti,mode-sleep = <0>;
+						regulator-ramp-delay = <5000>;
+						ti,warm-reset;
+					};
+
+					tps65913_smps9: smps9 {
+						regulator-name = "vdd-1v05";
+						regulator-min-microvolt = <1050000>;
+						regulator-max-microvolt = <1050000>;
+						regulator-always-on;
+						ti,warm-reset;
+					};
+
+					/* LDO1: 1.2V (camera AVDD per SSDT) */
+					ldo1 {
+						regulator-min-microvolt = <1200000>;
+						regulator-max-microvolt = <1200000>;
+						regulator-always-on;
+						regulator-boot-on;
+					};
+
+					/* LDO2: 2.8V (camera DOVDD per SSDT) */
+					ldo2 {
+						regulator-min-microvolt = <2800000>;
+						regulator-max-microvolt = <2800000>;
+						regulator-always-on;
+						regulator-boot-on;
+					};
+
+					/* LDO3: AVDD-DSI-CSI */
+					ldo3 {
+						regulator-name = "avdd-dsi-csi";
+						regulator-min-microvolt = <1200000>;
+						regulator-max-microvolt = <1200000>;
+						regulator-always-on;
+						regulator-boot-on;
+					};
+
+					/* LDO5: 1.8V (camera DVDD per SSDT) */
+					ldo5 {
+						regulator-min-microvolt = <1800000>;
+						regulator-max-microvolt = <1800000>;
+						regulator-always-on;
+						regulator-boot-on;
+					};
+
+					/* LDO7: 1.8V (front camera AVDD per SSDT) */
+					ldo7 {
+						regulator-min-microvolt = <1800000>;
+						regulator-max-microvolt = <1800000>;
+						regulator-always-on;
+						regulator-boot-on;
+					};
+
+					ldo8 {
+						regulator-name = "vdd-rtc";
+						regulator-min-microvolt = <1200000>;
+						regulator-max-microvolt = <1200000>;
+						regulator-always-on;
+						regulator-boot-on;
+					};
+
+					tps65913_ldo9: ldo9 {
+						regulator-name = "vddio-sdmmc-2";
+						regulator-min-microvolt = <1800000>;
+						regulator-max-microvolt = <3300000>;
+						regulator-always-on;
+					};
+
+					ldoln {
+						regulator-min-microvolt = <1800000>;
+						regulator-max-microvolt = <1800000>;
+						regulator-always-on;
+					};
+
+					ldousb {
+						regulator-name = "avdd-usb";
+						regulator-min-microvolt = <3300000>;
+						regulator-max-microvolt = <3300000>;
+						regulator-always-on;
+						regulator-boot-on;
+					};
+
+					regen2 {
+						regulator-max-microvolt = <5000000>;
+						regulator-always-on;
+						regulator-boot-on;
+					};
+
+					sysen1 {
+					};
+				};
+			};
+
+			rtc {
+				compatible = "ti,palmas-rtc";
+				interrupt-parent = <&palmas>;
+				interrupts = <8 0>;
+			};
+		};
+	};
+
+	/* --- PMC -------------------------------------------------------- */
+	/* Source: Andrew (tested) */
+	pmc@7000e400 {
+		nvidia,invert-interrupt;
+		nvidia,suspend-mode = <2>;
+		nvidia,cpu-pwr-good-time = <300>;
+		nvidia,cpu-pwr-off-time = <300>;
+		nvidia,core-pwr-good-time = <641 3845>;
+		nvidia,core-pwr-off-time = <2000>;
+		nvidia,core-power-req-active-high;
+		nvidia,sys-clock-req-active-high;
+
+		/* Thermal trip: clear DEV_ON in TPS65913 to shut down */
+		i2c-thermtrip {
+			nvidia,i2c-controller-id = <4>;
+			nvidia,bus-addr = <0x58>;
+			nvidia,reg-addr = <0xA0>;
+			nvidia,reg-data = <0x00>;
+		};
+	};
+
+	/* --- HDA (HDMI Audio) ------------------------------------------- */
+	/* REGISTRY: NVDA010F at 0x70030000, driver HDAudBus */
+	hda@70030000 {
+		status = "okay";
+	};
+
+	/* --- Audio Hub (I2S) -------------------------------------------- */
+	/* REGISTRY: NVDA0107 at 0x70080000 */
+	ahub@70080000 {
+		i2s@70080400 {
+			status = "okay";
+		};
+	};
+
+	/* --- WiFi -- SDMMC1 (Marvell 88W8797) --------------------------- */
+	/* Source: Andrew EFI DTS (tested)
+	 * REGISTRY: NVDA0212\0 at 0x78000000
+	 * NOTE: WiFi is on SDMMC1 (0x78000000), NOT SDMMC3.
+	 *   Our earlier docs had WiFi/SD slots swapped -- corrected.
+	 * Andrew's note: "Firmware doesn't come active in time" */
+	mmc@78000000 {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		status = "okay";
+
+		bus-width = <4>;
+		cap-power-off-card;
+		keep-power-in-suspend;
+		max-frequency = <100000000>;
+
+		assigned-clocks = <&tegra_car TEGRA114_CLK_SDMMC1>;
+		assigned-clock-parents = <&tegra_car TEGRA114_CLK_PLL_C>;
+		assigned-clock-rates = <100000000>;
+
+		mmc-pwrseq = <&mrvl_wifi_pwrseq>;
+
+		wifi@1 {
+			compatible = "marvell,sd8897";
+			reg = <1>;
+			interrupt-parent = <&gpio>;
+			interrupts = <TEGRA_GPIO(U, 5) IRQ_TYPE_LEVEL_LOW>;
+		};
+	};
+
+	/* --- SD Card -- SDMMC3 ------------------------------------------ */
+	/* REGISTRY: NVDA0212\2 at 0x78000400
+	 * Source: Andrew (tested) -- DISABLED due to UART-A pin conflict.
+	 *   SDMMC3 CMD/DAT pins are muxed to UART-A for debug console.
+	 *   Cannot use SD card and debug console simultaneously. */
+	mmc@78000400 {
+		status = "disabled";
+		bus-width = <4>;
+		cd-gpios = <&gpio TEGRA_GPIO(V, 2) GPIO_ACTIVE_LOW>;
+	};
+
+	/* --- eMMC -- SDMMC4 --------------------------------------------- */
+	/* REGISTRY: NVDA0212\3 at 0x78000600, SK Hynix 32/64GB */
+	mmc@78000600 {
+		status = "okay";
+		bus-width = <8>;
+		non-removable;
+	};
+
+	/* --- USB1 (EHCI, external port) --------------------------------- */
+	/* REGISTRY: NVDA0203\0
+	 * Source: Andrew (tested) -- OTG mode */
+	usb@7d000000 {
+		status = "okay";
+		compatible = "nvidia,tegra114-udc";
+		dr_mode = "otg";
+	};
+
+	usb-phy@7d000000 {
+		status = "okay";
+		/* TODO: vbus-supply */
+	};
+
+	/* USB2 (0x7D004000) -- Internal HSIC. REGISTRY: NVDA0203\1.
+	 * DSDT: "USB2 _STA forced off". Left disabled. */
+
+	/* USB3 (0x7D008000) -- HSIC, modem (absent on WiFi-only Surface 2).
+	 * NOT ENUMERATED in registry. Left disabled. */
+
+	/* XUSB (0x70090000, NVDA0214) -- xHCI, known unreliable.
+	 * Left disabled; kernel config builds as module for testing. */
+
+	/* --- Backlight -------------------------------------------------- */
+	/* Source: Andrew (tested) */
+	backlight: backlight {
+		compatible = "pwm-backlight";
+
+		enable-gpios = <&gpio TEGRA_GPIO(CC, 2) GPIO_ACTIVE_HIGH>;
+		pwms = <&pwm 0 100000>;
+
+		brightness-levels = <1 255>;
+		num-interpolated-steps = <254>;
+		default-brightness-level = <128>;
+	};
+
+	/* --- 32 kHz Clock ----------------------------------------------- */
+	clk32k_in: clock-32 {
 		compatible = "fixed-clock";
 		clock-frequency = <32768>;
 		#clock-cells = <0>;
 	};
 
-	/*
-	 * ─── Display ───────────────────────────────────────────────
-	 * Samsung LTL106HL02-001, 1920x1080, DSI interface
-	 * DSDT GFXC: NVDA0205 at 0x50000000 (80 MB GPU aperture)
-	 * Framebuffer at 0xB0000000 (size from FMGB/FMGL)
-	 */
-	/* Display node is typically provided by the base tegra114.dtsi
-	 * and Andrew's all.dtb. The panel node should reference
-	 * samsung,ltl106hl02 if a binding exists, or use
-	 * simple-panel with the correct timings. */
+	/* --- Type Cover (I2C hotplug) ----------------------------------- */
+	/* Source: Andrew EFI DTS
+	 * Andrew's note: "Works for APX but only after replug.
+	 *   Not immediately after boot. Not acceptable for now." */
+	i2c-cover {
+		compatible = "i2c-hotplug-gpio";
 
-	/*
-	 * ─── Wi-Fi (Marvell 88W8797 via SDIO) ─────────────────────
-	 * DSDT: SDM3 at 0x78000400 (NVDA0212, PNP0D40)
-	 * Driver: mwifiex_sdio
-	 * Firmware: /lib/firmware/mrvl/sd8797_uapsta.bin
-	 */
-	/* Wi-Fi is on SDHCI slot 3. Andrew's all.dtb already has
-	 * the marvell,sd8897 (or sd8797) node on the correct SDIO bus.
-	 * Verify compatible string matches your chip variant. */
+		#address-cells = <1>;
+		#size-cells = <0>;
 
-	/*
-	 * ─── Audio (Wolfson WM8962) ────────────────────────────────
-	 * DSDT: AUDI (NVDA0107) at 0x70080000 (I2S + DMA)
-	 * DSDT: HDAU (NVDA010F) at 0x70030000 (HDA for HDMI)
-	 * Codec: WM8962 on I2C bus
-	 * Driver: snd-soc-wm8962 + snd-soc-tegra
-	 */
-	/* Audio codec node: wlf,wm8962 on one of the I2C buses.
-	 * Andrew's all.dtb should have this. */
+		interrupts-extended = <&gpio TEGRA_GPIO(S, 0) IRQ_TYPE_EDGE_BOTH>;
+		detect-gpios = <&gpio TEGRA_GPIO(S, 0) GPIO_ACTIVE_HIGH>;
 
-	/*
-	 * ─── Touchscreen (Atmel maXTouch mXT1664S) ────────────────
-	 * On I2C bus 1 (DSDT I2C1: NVDA0101 at 0x7000C000)
-	 * Driver: atmel_mxt_ts (preferred) or i2c-hid-of
-	 * Andrew's DTB uses hid-over-i2c compatible
-	 */
-	/* Touch node should be on i2c1 with correct address.
-	 * If using atmel_mxt_ts, compatible = "atmel,maxtouch" */
+		i2c-parent = <&i2c1>;
 
-	/*
-	 * ─── Sensor Hub (MSHW0102 / PNP0C50) ─────────────────────
-	 * SSDT: SNMU on I2C1 @ 0x28
-	 * HID: MSHW0102 (Microsoft Surface Hardware)
-	 * CID: PNP0C50 (HID-over-I2C)
-	 * Contains: accelerometer, gyroscope (via HID sensor protocol)
-	 * Driver: hid-sensor-hub + i2c-hid-of
-	 *
-	 * Template:
-	 * &i2c1 {
-	 *     sensor_hub: sensor-hub@28 {
-	 *         compatible = "hid-over-i2c";
-	 *         reg = <0x28>;
-	 *         hid-descr-addr = <0x0001>;  // verify from WinRT dump
-	 *         // interrupt GPIO TBD
-	 *     };
-	 * };
-	 */
+		cover@0 {
+			compatible = "hid-over-i2c";
+			reg = <0x00>;
+			hid-descr-addr = <0x0041>;
+			interrupt-parent = <&gpio>;
+			interrupts = <TEGRA_GPIO(C, 7) IRQ_TYPE_LEVEL_LOW>;
+		};
+	};
 
-	/*
-	 * ─── LID Sensor ──────────────────────────────────────────
-	 * DSDT: LID_ (PNP0C0D)
-	 * GPIOs: H3 (GPH3) + R4 (GPR4) — via GpioIo resources
-	 * State: LIDB (1 = open, 0 = closed)
-	 * Behavior: notifies LID_ (0x80) and TOUC (disables touch
-	 *           when Type Cover folded back)
-	 * Driver: gpio-keys
-	 *
-	 * Template:
-	 * lid-switch {
-	 *     compatible = "gpio-keys";
-	 *     lid {
-	 *         label = "Lid";
-	 *         gpios = <&gpio TEGRA_GPIO(H, 3) GPIO_ACTIVE_LOW>;
-	 *         linux,input-type = <5>;  // EV_SW
-	 *         linux,code = <0>;        // SW_LID
-	 *         wakeup-source;
-	 *     };
-	 * };
-	 */
+	/* --- WiFi Power Sequence ---------------------------------------- */
+	/* Source: Andrew EFI DTS */
+	mrvl_wifi_pwrseq: wifi-pwrseq {
+		compatible = "mmc-pwrseq-simple";
 
-	/*
-	 * ─── PMIC (TI TPS65913 / Palmas) ─────────────────────────
-	 * DSDT: I2C4 at 0x7000C700 or I2C5 at 0x7000D000
-	 * Driver: palmas (tps65913)
-	 * Regulators for CPU, GPU, memory, I/O rails
-	 */
+		clocks = <&tegra_pmc TEGRA_PMC_CLK_BLINK>;
+		clock-names = "ext_clock";
 
-	/*
-	 * ─── Charger (TI TPS65090) ────────────────────────────────
-	 * On I2C bus (exact bus TBD)
-	 * Driver: tps65090-charger, mfd-tps65090
-	 */
+		post-power-on-delay-ms = <300>;
+		power-off-delay-us = <300>;
+		/* Reset and enable GPIOs: K0, K2, K4 */
+	};
 
-	/*
-	 * ─── USB Controllers ──────────────────────────────────────
-	 * USB1: 0x7D000000 (EHCI) — EXTERNAL port, standard host mode
-	 *       UMOD register at offset 0x1A4 for host/device mode
-	 * USB2: 0x7D004000 (EHCI+HSIC) — INTERNAL only
-	 *       ACPI has debug: "USB2 _STA forced off"
-	 *       STAF=0xF0 force-disables; controlled by ^^US2E flag
-	 *       Complex HSIC PHY init via WRF_/WRR_ methods
-	 * USB3: 0x7D008000 (EHCI+HSIC) — INTERNAL only
-	 *       Has MRIN (modem reset init) + BBEN (baseband enable)
-	 *       Likely connects to nothing on Wi-Fi-only Surface 2
-	 * XUSB: 0x70090000 (xHCI, NVDA0214, PNP0D10) — unreliable
-	 *       PHY at 0x50041000
-	 *
-	 * Driver: ehci-tegra, tegra-xhci
-	 * For Linux: use USB1 (external) only; USB2/USB3 HSIC
-	 * can be disabled in DTS. xHCI is unreliable.
-	 */
+	/* --- Lid / Hall Effect Sensor ----------------------------------- */
+	/* REGISTRY: PNP0C0D. Source: Andrew (tested, GPIO R4) */
+	gpio-hall-sensor {
+		compatible = "gpio-keys";
 
-	/*
-	 * ─── GPIO ─────────────────────────────────────────────────
-	 * DSDT: GPIO (NVDA0008) at 0x6000D000, 8 banks
-	 * Driver: gpio-tegra (in tegra114.dtsi)
-	 * Used for: buttons, power control, reset lines
-	 */
+		label = "GPIO Hall Effect Sensor";
 
-	/*
-	 * ─── Thermal ──────────────────────────────────────────────
-	 * DSDT: THEM (NVDAF300) at 0x700E2000
-	 * Driver: tegra-soctherm
-	 *
-	 * SSDT defines 4 thermal zones:
-	 *   TZ01: CPU/GPU die temp (IR Thermal via THEM)
-	 *   TZ02: Secondary zone (THEM)
-	 *   TZ03: Backlight temp (I2C3 sensor, DHTH)
-	 *   TZ04: "LTE Thermal" (odd for Wi-Fi-only device, I2C3)
-	 *
-	 * Thresholds: _CRT=90°C (shutdown), _PSV=65°C (passive)
-	 * HTMP flag: when set, uses "Dev Kit" params instead of prod
-	 */
+		hall-sensor {
+			label = "Hall Effect Sensor";
+			gpios = <&gpio TEGRA_GPIO(R, 4) GPIO_ACTIVE_HIGH>;
+			linux,input-type = <EV_SW>;
+			linux,code = <SW_LID>;
+			linux,can-disable;
+			wakeup-source;
+		};
+	};
 
-	/*
-	 * ─── I2C Buses ────────────────────────────────────────────
-	 * I2C1: 0x7000C000 (IRQ 70)  — Touchscreen + Sensor hub (SNMU/MSHW0102 @ 0x28)
-	 * I2C2: 0x7000C400 (IRQ 116) — Audio codec (WM8962 @ 0x4B?)
-	 * I2C3: 0x7000C500 (IRQ 124) — Misc peripherals
-	 * I2C4: 0x7000C700 (IRQ 152) — Misc peripherals
-	 * I2C5: 0x7000D000 (IRQ 85)  — PMIC + Camera + Charger
-	 *        0x58-0x5B: TPS65913 Palmas (4 pages)
-	 *        0x12: Camera sensor
-	 *        0x43: Unknown (VCM/flash?)
-	 *        0x48: TPS65090 charger
-	 * All use NVDA0101 HID
-	 *
-	 * Other devices found in SSDT:
-	 *   BTH0 (NVDAF000) — Bluetooth on UART3 (0x70006200)
-	 *     Marvell combo chip shared with 88W8797 Wi-Fi
-	 *     Driver: btmrvl / hci_uart
-	 *   GPSD (MSHW0010) — Microsoft virtual location service
-	 *   RTCD — Palmas RTC (palmas-rtc) on I2C5, via RTCF field
-	 *   LCD0 — Display panel, dual DSI (DSIB), backlight via BKLG/DSLG
-	 */
+	/* --- GPIO Buttons ----------------------------------------------- */
+	/* REGISTRY: NVDAF180 (PNP0C40). Source: Andrew (tested) */
+	gpio-keys {
+		compatible = "gpio-keys";
 
-	/*
-	 * ─── Storage ──────────────────────────────────────────────
-	 * SDM1: 0x78000000 — SD card slot
-	 * SDM2: 0x78000200 — (purpose TBD)
-	 * SDM3: 0x78000400 — Wi-Fi SDIO (Marvell 88W8797)
-	 * SDM4: 0x78000600 — eMMC (SK Hynix 32/64GB)
-	 * All use Tegra SDHCI (NVDA0212, PNP0D40)
-	 */
+		label = "GPIO Buttons";
 
-	/*
-	 * ─── UARTs ────────────────────────────────────────────────
-	 * UAR1: 0x70006000 (Debug UART-A)
-	 * UAR2: 0x70006040
-	 * UAR3: 0x70006200
-	 * UAR4: 0x70006300
-	 * UAR5: 0x70006400
-	 * All use NVDA0100
-	 */
+		power {
+			label = "Power Button";
+			gpios = <&gpio TEGRA_GPIO(V, 0) GPIO_ACTIVE_HIGH>;
+			linux,code = <KEY_POWER>;
+			debounce-interval = <10>;
+			wakeup-source;
+		};
 
-	/* ═══════════════════════════════════════════════════════════
-	 * CAMERA — FOUND IN SSDT (not DSDT)
-	 * ═══════════════════════════════════════════════════════════
-	 *
-	 * Source: acpiview_dump_rt2_20200805.txt, SSDT at 0xFDF05000
-	 *        (84,806 bytes, NVIDIA AP20EDK2)
-	 *
-	 * The Surface 2 has:
-	 *   - 3.5 MP front-facing camera
-	 *   - 5.0 MP rear-facing camera
-	 *
-	 * ACPI device: CAM0 under \_SB.GFXC scope
-	 *   _ADR = 0x80031200 (NVIDIA proprietary encoding)
-	 *   CPWR method: 3-stage power sequencing (sensor, AF, flash)
-	 *
-	 * I2C bus: I2C5 (0x7000D000, IRQ 85, 1.4 MHz Fast Mode Plus)
-	 * Candidate I2C address: 0x12 (from _ADR + PMUD resource list)
-	 *
-	 * GPIO pins (decoded from SSDT GpioIo descriptors):
-	 *   FCRS = GPIO BB3 (#219) — Front/Flash camera reset
-	 *   RCRS = GPIO BB7 (#223) — Rear camera reset
-	 *   RAFO = GPIO R4  (#140) — Rear autofocus control
-	 *   RAFN = GPIO EE1 (#241) — Rear autofocus enable
-	 *   FLED = GPIO S1  (#145) — Flash LED control
-	 *
-	 * Power rails (Palmas PMIC LDOs via I2C5 @ 0x58):
-	 *   LDO1, LDO2, LDO5, LDO7, LDO9
-	 *   FET1, FET4, FET6 (switched power domains)
-	 *
-	 * Board ID (BDID) conditional features:
-	 *   BDID <= 1: autofocus via RAFO/RAFN
-	 *   BDID >  1: alternate autofocus path
-	 *   BDID <= 4: flash LED disabled
-	 *   BDID >  4: flash LED enabled
-	 *
-	 * Tegra 4 VI block: 0x54080000 (from TRM)
-	 * CSI block: 0x54080838
-	 *
-	 * Sensor model NOT named in ACPI — NVIDIA NvCamera driver
-	 * handles this opaquely. Run winrt-device-discovery.ps1 or
-	 * probe I2C5 from Linux to identify the sensor chip.
-	 *
-	 * Common 2013-era candidates:
-	 *   Front (3.5MP): OV2722, OV3640, OV2680, MT9M114
-	 *   Rear  (5.0MP): OV5693, OV5640, OV5648, AR0543
-	 *
-	 * Other PMUD-managed I2C5 devices:
-	 *   0x58-0x5B — TPS65913 Palmas PMIC (4 register pages)
-	 *   0x12      — Camera sensor (probable)
-	 *   0x43      — Unknown (VCM driver / flash controller?)
-	 *   0x48      — TPS65090 charger (probable)
-	 *
-	 * Template for when the sensor is identified:
-	 *
-	 * &i2c5 {
-	 *     status = "okay";
-	 *     clock-frequency = <1400000>;
-	 *
-	 *     rear_camera: camera@12 {
-	 *         compatible = "TBD";  // replace with actual sensor
-	 *         reg = <0x12>;
-	 *         clocks = <&tegra_car TEGRA114_CLK_VI_SENSOR>;
-	 *         clock-names = "mclk";
-	 *         reset-gpios = <&gpio TEGRA_GPIO(BB, 7) GPIO_ACTIVE_LOW>;
-	 *         // RAFO (autofocus): TEGRA_GPIO(R, 4)
-	 *         // RAFN (AF enable): TEGRA_GPIO(EE, 1)
-	 *         avdd-supply = <&palmas_ldo1>;
-	 *         dovdd-supply = <&palmas_ldo2>;
-	 *         dvdd-supply = <&palmas_ldo5>;
-	 *
-	 *         port {
-	 *             rear_cam_out: endpoint {
-	 *                 remote-endpoint = <&csi_in0>;
-	 *                 data-lanes = <1 2>;
-	 *                 clock-lanes = <0>;
-	 *                 link-frequencies = /bits/ 64 <300000000>;
-	 *             };
-	 *         };
-	 *     };
-	 *
-	 *     front_camera: camera@XX {
-	 *         compatible = "TBD";  // replace with actual sensor
-	 *         reg = <0xXX>;       // address TBD
-	 *         clocks = <&tegra_car TEGRA114_CLK_VI_SENSOR2>;
-	 *         clock-names = "mclk";
-	 *         reset-gpios = <&gpio TEGRA_GPIO(BB, 3) GPIO_ACTIVE_LOW>;
-	 *         avdd-supply = <&palmas_ldo7>;
-	 *         dovdd-supply = <&palmas_ldo9>;
-	 *
-	 *         port {
-	 *             front_cam_out: endpoint {
-	 *                 remote-endpoint = <&csi_in1>;
-	 *                 data-lanes = <1>;
-	 *                 clock-lanes = <0>;
-	 *             };
-	 *         };
-	 *     };
-	 * };
-	 *
-	 * // Tegra VI / CSI host side:
-	 * &vi {
-	 *     status = "okay";
-	 *
-	 *     ports {
-	 *         port@0 {
-	 *             csi_in0: endpoint {
-	 *                 remote-endpoint = <&rear_cam_out>;
-	 *             };
-	 *         };
-	 *         port@1 {
-	 *             csi_in1: endpoint {
-	 *                 remote-endpoint = <&front_cam_out>;
-	 *             };
-	 *         };
-	 *     };
-	 * };
-	 */
+		windows-button {
+			label = "Windows Button";
+			gpios = <&gpio TEGRA_GPIO(I, 5) GPIO_ACTIVE_HIGH>;
+			linux,code = <KEY_LEFTMETA>;
+			debounce-interval = <10>;
+			wakeup-source;
+		};
+
+		volume-down {
+			label = "Volume Down";
+			gpios = <&gpio TEGRA_GPIO(R, 1) GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_VOLUMEDOWN>;
+			debounce-interval = <10>;
+		};
+
+		volume-up {
+			label = "Volume Up";
+			gpios = <&gpio TEGRA_GPIO(R, 2) GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_VOLUMEUP>;
+			debounce-interval = <10>;
+		};
+	};
+
+	/* --- Sound ------------------------------------------------------ */
+	/* Source: Andrew (tested) */
+	sound {
+		compatible = "nvidia,tegra-audio-wm8962";
+		nvidia,model = "NVIDIA Tegra Surface 2";
+
+		nvidia,audio-routing =
+			"Headphone Jack", "HPOUTR",
+			"Headphone Jack", "HPOUTL",
+			"Int Spk", "SPKOUTR",
+			"Int Spk", "SPKOUTL";
+
+		nvidia,i2s-controller = <&tegra_i2s1>;
+		nvidia,audio-codec = <&wm8962>;
+
+		nvidia,hp-det-gpios = <&gpio TEGRA_GPIO(W, 2) GPIO_ACTIVE_LOW>;
+
+		clocks = <&tegra_car TEGRA114_CLK_PLL_A>,
+			 <&tegra_car TEGRA114_CLK_PLL_A_OUT0>,
+			 <&tegra_pmc TEGRA_PMC_CLK_OUT_1>;
+		clock-names = "pll_a", "pll_a_out0", "mclk";
+
+		assigned-clocks = <&tegra_car TEGRA114_CLK_EXTERN1>,
+				  <&tegra_pmc TEGRA_PMC_CLK_OUT_1>;
+
+		assigned-clock-parents = <&tegra_car TEGRA114_CLK_PLL_A_OUT0>,
+					 <&tegra_car TEGRA114_CLK_EXTERN1>;
+	};
+
+	/* --- Fixed Regulators ------------------------------------------- */
+
+	vdd_ac_bat_reg: regulator-acbat {
+		compatible = "regulator-fixed";
+		regulator-name = "vdd_ac_bat";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		regulator-always-on;
+	};
+
+	stub_sd_reg: stub_sd {
+		compatible = "regulator-fixed";
+		regulator-name = "stub_sd";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+	};
+
+	stub_audio_reg: stub_audio {
+		compatible = "regulator-fixed";
+		regulator-name = "stub_audio";
+	};
+
+	/* Touchscreen VDD -- GPIO K6, 70ms ramp (from DSDT)
+	 * Uncomment when touch is verified */
+	/*
+	touchscreen_reg: touchscreen_vdd {
+		compatible = "regulator-fixed";
+		regulator-name = "touchscreen_vdd";
+		enable-active-high;
+		regulator-enable-ramp-delay = <70000>;
+		gpio = <&gpio TEGRA_GPIO(K, 6) GPIO_ACTIVE_HIGH>;
+		regulator-always-on;
+	};
+	*/
+
+	/* Sensor Hub VDD -- GPIO X6, 100ms ramp (from DSDT)
+	 * Uncomment when sensor hub is verified */
+	/*
+	sensor_hub_reg: sensor_hub_vdd {
+		compatible = "regulator-fixed";
+		regulator-name = "sensor_hub_vdd";
+		enable-active-high;
+		regulator-enable-ramp-delay = <100000>;
+		gpio = <&gpio TEGRA_GPIO(X, 6) GPIO_ACTIVE_HIGH>;
+		regulator-always-on;
+	};
+	*/
+
+	/* =================================================================
+	 * CAMERA -- sensor model unknown, enable when identified.
+	 * SSDT: CAM0 under \_SB.GFXC, I2C5 @ 0x12
+	 * GPIOs: BB3 (front reset), BB7 (rear reset), R4 (AF),
+	 *        EE1 (AF enable), S1 (flash LED)
+	 * Power: Palmas LDO1/2/5/7/9, TPS65090 FET1/4/6
+	 * Candidates: OV5693/OV5640 (rear 5MP), OV2722/MT9M114 (front 3.5MP)
+	 * ================================================================= */
 };

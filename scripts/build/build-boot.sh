@@ -77,7 +77,7 @@ copy_firmware() {
 
     # Download Marvell firmware if not present
     local FW_URL="https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain/mrvl"
-    for fw in sd8797_uapsta.bin sd8797_uapsta_a0.bin; do
+    for fw in sd8797_uapsta.bin; do
         if [ ! -f "$STAGING_DIR/lib/firmware/mrvl/$fw" ]; then
             info "Downloading $fw ..."
             wget -q -O "$STAGING_DIR/lib/firmware/mrvl/$fw" "$FW_URL/$fw" 2>/dev/null || \
