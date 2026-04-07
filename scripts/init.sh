@@ -59,18 +59,34 @@ if [ -z "$STAGE_PART" ]; then
     fi
 fi
 
+
 # ─── Safety checks ────────────────────────────────────────────────
 # Refuse to write to EFI (p1), Windows (p2), or recovery (p3/p4)
 case "$ROOT_PART" in
-    *mmcblk0p[1234]) fail "SAFETY: $ROOT_PART looks like an EFI/Windows/recovery partition. Refusing to overwrite." ;;
+    *mmcblk0p[1234])
+        fail "SAFETY: $ROOT_PART looks like an EFI/Windows/recovery partition. Refusing to overwrite."
+        ;;
 esac
-# Refuse to write if target looks like NTFS or FAT (EFI)
+
+# Detect filesystem type and label
 ROOT_FSTYPE=$(blkid -s TYPE -o value "$ROOT_PART" 2>/dev/null || true)
+ROOT_LABEL=$(blkid -s LABEL -o value "$ROOT_PART" 2>/dev/null || true)
+ROOT_LABEL_LC=$(printf '%s' "$ROOT_LABEL" | tr '[:upper:]' '[:lower:]')
+
+# Refuse NTFS always
 case "$ROOT_FSTYPE" in
-    ntfs|ntfs-3g) fail "SAFETY: $ROOT_PART contains NTFS (Windows). Refusing to overwrite." ;;
-    vfat)         fail "SAFETY: $ROOT_PART contains FAT32 (EFI?). Refusing to overwrite." ;;
+    ntfs|ntfs-3g)
+        fail "SAFETY: $ROOT_PART contains NTFS (Windows). Refusing to overwrite."
+        ;;
+    vfat)
+        # Allow FAT32 only if the volume label is exactly "linux"
+        if [ "$ROOT_LABEL_LC" != "linux" ]; then
+            fail "SAFETY: $ROOT_PART contains FAT32 but label is '${ROOT_LABEL:-unknown}'. Refusing to overwrite unless label is 'linux'."
+        fi
+        ;;
 esac
-msg "Target partition $ROOT_PART passed safety checks (type: ${ROOT_FSTYPE:-unformatted})"
+
+msg "Target partition $ROOT_PART passed safety checks (type: ${ROOT_FSTYPE:-unformatted}, label: ${ROOT_LABEL:-none})"
 
 # ─── Mount staging ─────────────────────────────────────────────────
 msg "Mounting staging partition ($STAGE_PART) ..."
