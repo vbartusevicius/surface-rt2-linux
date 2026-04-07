@@ -132,8 +132,25 @@ build_dtb() {
     # Use our custom DTS if available, otherwise use kernel's built-in
     if [ -f "$DTS_DIR/tegra114-surface2.dts" ]; then
         info "Compiling custom DTS from $DTS_DIR/tegra114-surface2.dts"
-        dtc -I dts -O dtb -o "$BOOT_DIR/surface2-custom.dtb" "$DTS_DIR/tegra114-surface2.dts" 2>/dev/null || \
-            warn "Custom DTS compilation had warnings (may be OK)"
+        # DTS uses #include — needs cpp preprocessing, so use the kernel build system
+        local DTS_DEST=""
+        # Try both old and new kernel DTS paths
+        for dts_path in \
+            "$KERNEL_DIR/arch/arm/boot/dts" \
+            "$KERNEL_DIR/arch/arm/boot/dts/nvidia"; do
+            if [ -d "$dts_path" ]; then
+                DTS_DEST="$dts_path/tegra114-surface2.dts"
+                break
+            fi
+        done
+        if [ -n "$DTS_DEST" ]; then
+            cp "$DTS_DIR/tegra114-surface2.dts" "$DTS_DEST"
+            cd "$KERNEL_DIR"
+            make "$(basename "$DTS_DEST" .dts).dtb" 2>&1 || \
+                warn "Custom DTS compilation failed — will use kernel built-in DTBs"
+        else
+            warn "Cannot find kernel DTS directory — skipping custom DTS"
+        fi
     fi
 
     # Also copy any kernel-built Tegra114 DTBs
@@ -155,21 +172,47 @@ build_initramfs() {
     # Create minimal initramfs structure
     mkdir -p "$INITRAMFS_DIR"/{bin,sbin,etc,proc,sys,dev,mnt/stage,mnt/root,tmp,usr/bin,usr/sbin,lib}
 
-    # Copy busybox (static)
-    if [ -f /bin/busybox ]; then
-        cp /bin/busybox "$INITRAMFS_DIR/bin/busybox"
-    elif [ -f /usr/bin/busybox ]; then
-        cp /usr/bin/busybox "$INITRAMFS_DIR/bin/busybox"
-    else
-        error "busybox-static not found in container"
-    fi
+    # Copy busybox (static, ARM) — installed via busybox-static:armhf
+    local BB_ARM=""
+    for candidate in \
+        /usr/lib/arm-linux-gnueabihf/busybox/busybox \
+        /usr/bin/arm-linux-gnueabihf-busybox \
+        /bin/busybox; do
+        if [ -f "$candidate" ] && file "$candidate" | grep -qi arm; then
+            BB_ARM="$candidate"
+            break
+        fi
+    done
+    [ -n "$BB_ARM" ] || error "ARM busybox-static not found. Install busybox-static:armhf in the container."
+    cp "$BB_ARM" "$INITRAMFS_DIR/bin/busybox"
     chmod +x "$INITRAMFS_DIR/bin/busybox"
+    info "Using ARM busybox from $BB_ARM"
 
     # Create symlinks for essential commands
     for cmd in sh ash mount umount mkdir cp dd cat echo sync reboot \
                sleep ls mknod grep sed awk blkid switch_root \
                modprobe insmod lsmod ip ifconfig; do
         ln -sf busybox "$INITRAMFS_DIR/bin/$cmd"
+    done
+
+    # Copy ARM e2fsprogs (for e2fsck / resize2fs in installer)
+    for tool in e2fsck resize2fs; do
+        local TOOL_ARM=""
+        for candidate in \
+            /usr/lib/arm-linux-gnueabihf/$tool \
+            /usr/sbin/$tool; do
+            if [ -f "$candidate" ] && file "$candidate" | grep -qi arm; then
+                TOOL_ARM="$candidate"
+                break
+            fi
+        done
+        if [ -n "$TOOL_ARM" ]; then
+            cp "$TOOL_ARM" "$INITRAMFS_DIR/sbin/$tool"
+            chmod +x "$INITRAMFS_DIR/sbin/$tool"
+            info "Copied ARM $tool from $TOOL_ARM"
+        else
+            warn "ARM $tool not found — installer will skip filesystem check/resize"
+        fi
     done
 
     # Copy our installer init script

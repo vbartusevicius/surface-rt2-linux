@@ -1,4 +1,4 @@
-# Surface 2 — Linux on Tegra 4
+# Surface 2 - Linux on Tegra 4
 
 Run Linux on the **Microsoft Surface 2** tablet (NVIDIA Tegra 4 T114, ARM32).
 
@@ -49,7 +49,14 @@ This produces:
 1. Format USB as **FAT32**
 2. Copy everything from `output/boot/` to the USB root
 3. Copy `output/staging/*` to Surface 2 **partition 6**
-4. Also place a root filesystem image (e.g. Raspbian Bookworm armhf `rootfs.img`) on partition 6
+4. Place a root filesystem image on partition 6, named `rootfs.img` (raw ext4 image).
+   Example — Raspberry Pi OS Lite armhf from [raspberrypi.com/software](https://www.raspberrypi.com/software/operating-systems/):
+   ```bash
+   xz -d 2024-*-raspios-bookworm-armhf-lite.img.xz
+   # Extract the root partition (usually partition 2) from the .img:
+   OFFSET=$(fdisk -l *.img | awk '/Linux/ {print $2}')
+   dd if=*.img of=rootfs.img bs=512 skip=$OFFSET count=$(fdisk -l *.img | awk '/Linux/ {print $4}')
+   ```
 
 ## Step 4 — Boot & install
 

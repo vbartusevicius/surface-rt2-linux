@@ -37,6 +37,19 @@ done
 [ -b "$STAGE_PART" ] || fail "Staging partition $STAGE_PART not found after 30s"
 [ -b "$ROOT_PART" ]  || fail "Root partition $ROOT_PART not found"
 
+# ─── Safety checks ────────────────────────────────────────────────
+# Refuse to write to EFI (p1), Windows (p2), or recovery (p3/p4)
+case "$ROOT_PART" in
+    *mmcblk0p[1234]) fail "SAFETY: $ROOT_PART looks like an EFI/Windows/recovery partition. Refusing to overwrite." ;;
+esac
+# Refuse to write if target looks like NTFS or FAT (EFI)
+ROOT_FSTYPE=$(blkid -s TYPE -o value "$ROOT_PART" 2>/dev/null || true)
+case "$ROOT_FSTYPE" in
+    ntfs|ntfs-3g) fail "SAFETY: $ROOT_PART contains NTFS (Windows). Refusing to overwrite." ;;
+    vfat)         fail "SAFETY: $ROOT_PART contains FAT32 (EFI?). Refusing to overwrite." ;;
+esac
+msg "Target partition $ROOT_PART passed safety checks (type: ${ROOT_FSTYPE:-unformatted})"
+
 # ─── Mount staging ─────────────────────────────────────────────────
 msg "Mounting staging partition ($STAGE_PART) ..."
 mkdir -p "$STAGE_MNT" "$ROOT_MNT"
