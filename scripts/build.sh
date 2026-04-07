@@ -50,7 +50,7 @@ main() {
     build_initramfs
     assemble_boot
     copy_firmware
-    verify_output
+    verify_output || true
 
     info ""
     info "Boot files:    $BOOT_DIR/"

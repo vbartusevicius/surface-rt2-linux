@@ -36,6 +36,12 @@
 		reg = <0x80000000 0x80000000>; /* 2 GB */
 	};
 
+	clk32k_in: clock-32k {
+		compatible = "fixed-clock";
+		clock-frequency = <32768>;
+		#clock-cells = <0>;
+	};
+
 	/*
 	 * ─── Display ───────────────────────────────────────────────
 	 * Samsung LTL106HL02-001, 1920x1080, DSI interface
