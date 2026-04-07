@@ -1,0 +1,269 @@
+/*
+ * tegra114-surface2.dts — Device tree for Microsoft Surface 2 (Tegra 4 / T114)
+ *
+ * This is a TEMPLATE based on analysis of the Surface 2 DSDT, Open-RT
+ * community work, and Andrew Lee's device-tree efforts.
+ *
+ * Base: tegra114-microsoft-surface-2-all.dtb from Andrew Lee's repo.
+ * Convert Andrew's DTB to DTS, merge with this, then compile:
+ *   dtc -I dtb -O dts -o base.dts tegra114-microsoft-surface-2-all.dtb
+ *   # merge nodes from this file into base.dts
+ *   dtc -I dts -O dtb -o surface2-custom.dtb merged.dts
+ *
+ * IMPORTANT: This file documents the known hardware layout.
+ * Actual register addresses and interrupt numbers must be verified
+ * against the real DTB and kernel source.
+ */
+
+/dts-v1/;
+
+#include "tegra114.dtsi"
+
+/ {
+	model = "Microsoft Surface 2";
+	compatible = "microsoft,surface-2", "nvidia,tegra114";
+
+	aliases {
+		serial0 = &uarta;
+	};
+
+	chosen {
+		stdout-path = "serial0:115200n8";
+	};
+
+	memory@80000000 {
+		device_type = "memory";
+		reg = <0x80000000 0x80000000>; /* 2 GB */
+	};
+
+	/*
+	 * ─── Display ───────────────────────────────────────────────
+	 * Samsung LTL106HL02-001, 1920x1080, DSI interface
+	 * DSDT GFXC: NVDA0205 at 0x50000000 (80 MB GPU aperture)
+	 * Framebuffer at 0xB0000000 (size from FMGB/FMGL)
+	 */
+	/* Display node is typically provided by the base tegra114.dtsi
+	 * and Andrew's all.dtb. The panel node should reference
+	 * samsung,ltl106hl02 if a binding exists, or use
+	 * simple-panel with the correct timings. */
+
+	/*
+	 * ─── Wi-Fi (Marvell 88W8797 via SDIO) ─────────────────────
+	 * DSDT: SDM3 at 0x78000400 (NVDA0212, PNP0D40)
+	 * Driver: mwifiex_sdio
+	 * Firmware: /lib/firmware/mrvl/sd8797_uapsta.bin
+	 */
+	/* Wi-Fi is on SDHCI slot 3. Andrew's all.dtb already has
+	 * the marvell,sd8897 (or sd8797) node on the correct SDIO bus.
+	 * Verify compatible string matches your chip variant. */
+
+	/*
+	 * ─── Audio (Wolfson WM8962) ────────────────────────────────
+	 * DSDT: AUDI (NVDA0107) at 0x70080000 (I2S + DMA)
+	 * DSDT: HDAU (NVDA010F) at 0x70030000 (HDA for HDMI)
+	 * Codec: WM8962 on I2C bus
+	 * Driver: snd-soc-wm8962 + snd-soc-tegra
+	 */
+	/* Audio codec node: wlf,wm8962 on one of the I2C buses.
+	 * Andrew's all.dtb should have this. */
+
+	/*
+	 * ─── Touchscreen (Atmel maXTouch mXT1664S) ────────────────
+	 * On I2C bus 1 (DSDT I2C1: NVDA0101 at 0x7000C000)
+	 * Driver: atmel_mxt_ts (preferred) or i2c-hid-of
+	 * Andrew's DTB uses hid-over-i2c compatible
+	 */
+	/* Touch node should be on i2c1 with correct address.
+	 * If using atmel_mxt_ts, compatible = "atmel,maxtouch" */
+
+	/*
+	 * ─── PMIC (TI TPS65913 / Palmas) ─────────────────────────
+	 * DSDT: I2C4 at 0x7000C700 or I2C5 at 0x7000D000
+	 * Driver: palmas (tps65913)
+	 * Regulators for CPU, GPU, memory, I/O rails
+	 */
+
+	/*
+	 * ─── Charger (TI TPS65090) ────────────────────────────────
+	 * On I2C bus (exact bus TBD)
+	 * Driver: tps65090-charger, mfd-tps65090
+	 */
+
+	/*
+	 * ─── USB Controllers ──────────────────────────────────────
+	 * DSDT: USB1 at 0x7D000000 (EHCI, NVDA0203, PNP0D20)
+	 * DSDT: USB2 at 0x7D004000 (EHCI+HSIC, internal)
+	 * DSDT: USB3 at 0x7D008000 (EHCI+HSIC, internal)
+	 * DSDT: XUSB at 0x70090000 (xHCI, NVDA0214, PNP0D10)
+	 * Driver: ehci-tegra, tegra-xhci
+	 * NOTE: USB is known to be unreliable on Surface 2
+	 */
+
+	/*
+	 * ─── GPIO ─────────────────────────────────────────────────
+	 * DSDT: GPIO (NVDA0008) at 0x6000D000, 8 banks
+	 * Driver: gpio-tegra (in tegra114.dtsi)
+	 * Used for: buttons, power control, reset lines
+	 */
+
+	/*
+	 * ─── Thermal ──────────────────────────────────────────────
+	 * DSDT: THEM (NVDAF300) at 0x700E2000
+	 * Driver: tegra-soctherm
+	 */
+
+	/*
+	 * ─── I2C Buses ────────────────────────────────────────────
+	 * I2C1: 0x7000C000 (IRQ 70)  — Touchscreen + Sensors (SEN1)
+	 * I2C2: 0x7000C400 (IRQ 116) — Audio codec (WM8962 @ 0x4B?)
+	 * I2C3: 0x7000C500 (IRQ 124) — Misc peripherals
+	 * I2C4: 0x7000C700 (IRQ 152) — Misc peripherals
+	 * I2C5: 0x7000D000 (IRQ 85)  — PMIC + Camera + Charger
+	 *        0x58-0x5B: TPS65913 Palmas (4 pages)
+	 *        0x12: Camera sensor
+	 *        0x43: Unknown (VCM/flash?)
+	 *        0x48: TPS65090 charger
+	 * All use NVDA0101 HID
+	 *
+	 * Other devices found in SSDT:
+	 *   BTH0 (NVDAF000) — Bluetooth on UART3
+	 *   GPSD (MSHW0010) — Microsoft Surface sensor hub
+	 */
+
+	/*
+	 * ─── Storage ──────────────────────────────────────────────
+	 * SDM1: 0x78000000 — SD card slot
+	 * SDM2: 0x78000200 — (purpose TBD)
+	 * SDM3: 0x78000400 — Wi-Fi SDIO (Marvell 88W8797)
+	 * SDM4: 0x78000600 — eMMC (SK Hynix 32/64GB)
+	 * All use Tegra SDHCI (NVDA0212, PNP0D40)
+	 */
+
+	/*
+	 * ─── UARTs ────────────────────────────────────────────────
+	 * UAR1: 0x70006000 (Debug UART-A)
+	 * UAR2: 0x70006040
+	 * UAR3: 0x70006200
+	 * UAR4: 0x70006300
+	 * UAR5: 0x70006400
+	 * All use NVDA0100
+	 */
+
+	/* ═══════════════════════════════════════════════════════════
+	 * CAMERA — FOUND IN SSDT (not DSDT)
+	 * ═══════════════════════════════════════════════════════════
+	 *
+	 * Source: acpiview_dump_rt2_20200805.txt, SSDT at 0xFDF05000
+	 *        (84,806 bytes, NVIDIA AP20EDK2)
+	 *
+	 * The Surface 2 has:
+	 *   - 3.5 MP front-facing camera
+	 *   - 5.0 MP rear-facing camera
+	 *
+	 * ACPI device: CAM0 under \_SB.GFXC scope
+	 *   _ADR = 0x80031200 (NVIDIA proprietary encoding)
+	 *   CPWR method: 3-stage power sequencing (sensor, AF, flash)
+	 *
+	 * I2C bus: I2C5 (0x7000D000, IRQ 85, 1.4 MHz Fast Mode Plus)
+	 * Candidate I2C address: 0x12 (from _ADR + PMUD resource list)
+	 *
+	 * GPIO pins (decoded from SSDT GpioIo descriptors):
+	 *   FCRS = GPIO BB3 (#219) — Front/Flash camera reset
+	 *   RCRS = GPIO BB7 (#223) — Rear camera reset
+	 *   RAFO = GPIO R4  (#140) — Rear autofocus control
+	 *   RAFN = GPIO EE1 (#241) — Rear autofocus enable
+	 *   FLED = GPIO S1  (#145) — Flash LED control
+	 *
+	 * Power rails (Palmas PMIC LDOs via I2C5 @ 0x58):
+	 *   LDO1, LDO2, LDO5, LDO7, LDO9
+	 *   FET1, FET4, FET6 (switched power domains)
+	 *
+	 * Board ID (BDID) conditional features:
+	 *   BDID <= 1: autofocus via RAFO/RAFN
+	 *   BDID >  1: alternate autofocus path
+	 *   BDID <= 4: flash LED disabled
+	 *   BDID >  4: flash LED enabled
+	 *
+	 * Tegra 4 VI block: 0x54080000 (from TRM)
+	 * CSI block: 0x54080838
+	 *
+	 * Sensor model NOT named in ACPI — NVIDIA NvCamera driver
+	 * handles this opaquely. Run winrt-device-discovery.ps1 or
+	 * probe I2C5 from Linux to identify the sensor chip.
+	 *
+	 * Common 2013-era candidates:
+	 *   Front (3.5MP): OV2722, OV3640, OV2680, MT9M114
+	 *   Rear  (5.0MP): OV5693, OV5640, OV5648, AR0543
+	 *
+	 * Other PMUD-managed I2C5 devices:
+	 *   0x58-0x5B — TPS65913 Palmas PMIC (4 register pages)
+	 *   0x12      — Camera sensor (probable)
+	 *   0x43      — Unknown (VCM driver / flash controller?)
+	 *   0x48      — TPS65090 charger (probable)
+	 *
+	 * Template for when the sensor is identified:
+	 *
+	 * &i2c5 {
+	 *     status = "okay";
+	 *     clock-frequency = <1400000>;
+	 *
+	 *     rear_camera: camera@12 {
+	 *         compatible = "TBD";  // replace with actual sensor
+	 *         reg = <0x12>;
+	 *         clocks = <&tegra_car TEGRA114_CLK_VI_SENSOR>;
+	 *         clock-names = "mclk";
+	 *         reset-gpios = <&gpio TEGRA_GPIO(BB, 7) GPIO_ACTIVE_LOW>;
+	 *         // RAFO (autofocus): TEGRA_GPIO(R, 4)
+	 *         // RAFN (AF enable): TEGRA_GPIO(EE, 1)
+	 *         avdd-supply = <&palmas_ldo1>;
+	 *         dovdd-supply = <&palmas_ldo2>;
+	 *         dvdd-supply = <&palmas_ldo5>;
+	 *
+	 *         port {
+	 *             rear_cam_out: endpoint {
+	 *                 remote-endpoint = <&csi_in0>;
+	 *                 data-lanes = <1 2>;
+	 *                 clock-lanes = <0>;
+	 *                 link-frequencies = /bits/ 64 <300000000>;
+	 *             };
+	 *         };
+	 *     };
+	 *
+	 *     front_camera: camera@XX {
+	 *         compatible = "TBD";  // replace with actual sensor
+	 *         reg = <0xXX>;       // address TBD
+	 *         clocks = <&tegra_car TEGRA114_CLK_VI_SENSOR2>;
+	 *         clock-names = "mclk";
+	 *         reset-gpios = <&gpio TEGRA_GPIO(BB, 3) GPIO_ACTIVE_LOW>;
+	 *         avdd-supply = <&palmas_ldo7>;
+	 *         dovdd-supply = <&palmas_ldo9>;
+	 *
+	 *         port {
+	 *             front_cam_out: endpoint {
+	 *                 remote-endpoint = <&csi_in1>;
+	 *                 data-lanes = <1>;
+	 *                 clock-lanes = <0>;
+	 *             };
+	 *         };
+	 *     };
+	 * };
+	 *
+	 * // Tegra VI / CSI host side:
+	 * &vi {
+	 *     status = "okay";
+	 *
+	 *     ports {
+	 *         port@0 {
+	 *             csi_in0: endpoint {
+	 *                 remote-endpoint = <&rear_cam_out>;
+	 *             };
+	 *         };
+	 *         port@1 {
+	 *             csi_in1: endpoint {
+	 *                 remote-endpoint = <&front_cam_out>;
+	 *             };
+	 *         };
+	 *     };
+	 * };
+	 */
+};

@@ -1,0 +1,22 @@
+# Build artifacts
+output/
+linux/
+.initramfs/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ACPI dumps (hosted at https://open-rt.gitbook.io/open-surfacert/surface-rt2/hardware/acpi-dsdt-tables)
+# resources/acpiview_dump_rt2_20200805.txt
+# resources/SurfaceRT2.dsdt.txt
+resources/*
+!resources/.gitkeep
+
+# Editor
+*.swp
+*.swo
+*~
+.vscode/
+.idea/

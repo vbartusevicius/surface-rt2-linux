@@ -1,0 +1,97 @@
+# Surface 2 (Tegra 4) — Required Kernel Config Options
+# Reference: DSDT analysis + Open-RT community + Andrew Lee's guide
+#
+# Use this as a checklist when running `make menuconfig`.
+
+# ═══════════════════════════════════════════════════════════════════
+# CRITICAL (will not boot without these)
+# ═══════════════════════════════════════════════════════════════════
+CONFIG_EFI=y                    # EFI runtime support
+CONFIG_EFI_STUB=y               # Boot kernel directly as EFI app
+CONFIG_OF=y                     # Flattened Device Tree support
+CONFIG_BLK_DEV_INITRD=y         # initramfs/initrd support
+CONFIG_EXT4_FS=y                # Root filesystem
+CONFIG_MMC=y                    # MMC/SD host support
+CONFIG_MMC_SDHCI=y              # SDHCI framework
+CONFIG_MMC_SDHCI_TEGRA=y        # Tegra SDHCI driver
+
+# ═══════════════════════════════════════════════════════════════════
+# DISPLAY (framebuffer at minimum)
+# ═══════════════════════════════════════════════════════════════════
+CONFIG_DRM=y                    # Direct Rendering Manager
+CONFIG_DRM_TEGRA=y              # Tegra DRM driver (DC + DSI + HDMI)
+CONFIG_FB=y                     # Framebuffer support
+CONFIG_FRAMEBUFFER_CONSOLE=y    # Console on framebuffer
+
+# ═══════════════════════════════════════════════════════════════════
+# WI-FI (Marvell 88W8797)
+# ═══════════════════════════════════════════════════════════════════
+CONFIG_WIRELESS=y
+CONFIG_CFG80211=y               # Wireless extensions
+CONFIG_MAC80211=y               # MAC layer
+CONFIG_MWIFIEX=m                # Marvell WiFi-Ex driver
+CONFIG_MWIFIEX_SDIO=m           # SDIO transport (88W8797)
+# Firmware needed: /lib/firmware/mrvl/sd8797_uapsta.bin
+
+# ═══════════════════════════════════════════════════════════════════
+# TOUCHSCREEN (Atmel maXTouch mXT1664S)
+# ═══════════════════════════════════════════════════════════════════
+CONFIG_I2C=y                    # I2C core
+CONFIG_I2C_TEGRA=y              # Tegra I2C adapter
+CONFIG_HID=y                    # HID core
+CONFIG_I2C_HID=y                # HID-over-I2C transport
+CONFIG_I2C_HID_OF=y             # Device tree variant
+CONFIG_TOUCHSCREEN_ATMEL_MXT=m  # Native Atmel maXTouch driver
+
+# ═══════════════════════════════════════════════════════════════════
+# AUDIO (Wolfson WM8962)
+# ═══════════════════════════════════════════════════════════════════
+CONFIG_SOUND=y
+CONFIG_SND=y
+CONFIG_SND_SOC=y                # ALSA SoC layer
+CONFIG_SND_SOC_TEGRA=y          # Tegra I2S
+CONFIG_SND_SOC_WM8962=m         # WM8962 codec driver
+
+# ═══════════════════════════════════════════════════════════════════
+# POWER MANAGEMENT
+# ═══════════════════════════════════════════════════════════════════
+CONFIG_MFD_PALMAS=y             # TPS65913 PMIC (multi-function)
+CONFIG_REGULATOR_PALMAS=y       # TPS65913 regulators
+CONFIG_MFD_TPS65090=y           # TPS65090 charger MFD
+CONFIG_CHARGER_TPS65090=y       # TPS65090 charger driver
+CONFIG_REGULATOR_TPS65090=y     # TPS65090 regulators
+CONFIG_POWER_SUPPLY=y           # Power supply class
+
+# ═══════════════════════════════════════════════════════════════════
+# USB (unreliable but include)
+# ═══════════════════════════════════════════════════════════════════
+CONFIG_USB=y
+CONFIG_USB_EHCI_HCD=y           # EHCI host controller
+CONFIG_USB_EHCI_TEGRA=y         # Tegra EHCI
+CONFIG_USB_XHCI_HCD=y           # xHCI host controller
+CONFIG_USB_XHCI_TEGRA=y         # Tegra xHCI
+
+# ═══════════════════════════════════════════════════════════════════
+# MISC HARDWARE
+# ═══════════════════════════════════════════════════════════════════
+CONFIG_GPIO_TEGRA=y             # Tegra GPIO
+CONFIG_KEYBOARD_GPIO=y          # Volume/Power buttons
+CONFIG_PINCTRL_TEGRA114=y       # Pin muxing
+CONFIG_TEGRA_SOCTHERM=y         # Thermal sensor
+CONFIG_SERIAL_TEGRA=y           # UART (debug console)
+
+# ═══════════════════════════════════════════════════════════════════
+# 3D GPU (optional — grate driver stack)
+# ═══════════════════════════════════════════════════════════════════
+# CONFIG_DRM_TEGRA=y            # Already set above
+# User-space: libdrm-opentegra + mesa (tegra gallium) + libvdpau-tegra
+# See: https://github.com/grate-driver
+
+# ═══════════════════════════════════════════════════════════════════
+# CAMERA (not yet supported — requires sensor identification)
+# ═══════════════════════════════════════════════════════════════════
+# CONFIG_MEDIA_SUPPORT=y        # Enable when camera sensor is known
+# CONFIG_VIDEO_V4L2=y
+# CONFIG_VIDEO_TEGRA=y          # Tegra VI (Video Input)
+# CONFIG_VIDEO_OV5693=m         # Example: if rear is OV5693
+# CONFIG_VIDEO_OV2722=m         # Example: if front is OV2722
