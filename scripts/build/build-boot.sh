@@ -53,7 +53,7 @@ assemble_boot() {
     # Create startup.nsh
     cat > "$BOOT_DIR/startup.nsh" << 'STARTUP'
 fs0:
-\boot.efi initrd=\initrd.gz dtb=\surface2-custom.dtb root=/dev/ram0 init=/init console=tty0 earlyprintk loglevel=7
+\boot.efi initrd=\initrd.gz dtb=\tegra114-surface2.dtb root=/dev/ram0 init=/init console=tty0 earlyprintk loglevel=7
 STARTUP
 
     # Create commandline.txt (Raspberry Pi boot style, alternative)
@@ -64,7 +64,7 @@ CMDLINE
     # Create post-install startup.nsh (boot from eMMC)
     cat > "$BOOT_DIR/startup-emmc.nsh" << 'STARTUP_EMMC'
 fs0:
-\boot.efi dtb=\surface2-custom.dtb root=/dev/mmcblk0p5 rootfstype=ext4 rootwait console=tty0 loglevel=4
+\boot.efi dtb=\tegra114-surface2.dtb root=/dev/mmcblk0p5 rootfstype=ext4 rootwait console=tty0 loglevel=4
 STARTUP_EMMC
 
     info "Boot files assembled in $BOOT_DIR"
