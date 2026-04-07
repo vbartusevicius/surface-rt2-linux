@@ -42,6 +42,13 @@ CONFIG_I2C_HID_OF=y
 CONFIG_TOUCHSCREEN_ATMEL_MXT=m
 CONFIG_INPUT_TOUCHSCREEN=y
 
+# ─── Sensor Hub (MSHW0102 / PNP0C50 on I2C1 @ 0x28) ────────────
+CONFIG_HID_SENSOR_HUB=m
+CONFIG_HID_SENSOR_ACCEL_3D=m
+CONFIG_HID_SENSOR_GYRO_3D=m
+CONFIG_HID_SENSOR_IIO_COMMON=m
+CONFIG_IIO=y
+
 # ─── Audio (Wolfson WM8962 + Tegra I2S) ──────────────────────────
 CONFIG_SOUND=y
 CONFIG_SND=y
@@ -91,6 +98,7 @@ CONFIG_USB_HID=y
 # ─── I2C ──────────────────────────────────────────────────────────
 CONFIG_I2C=y
 CONFIG_I2C_TEGRA=y
+CONFIG_I2C_CHARDEV=y
 
 # ─── SPI ──────────────────────────────────────────────────────────
 CONFIG_SPI=y

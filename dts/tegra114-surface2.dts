@@ -77,6 +77,47 @@
 	 * If using atmel_mxt_ts, compatible = "atmel,maxtouch" */
 
 	/*
+	 * ─── Sensor Hub (MSHW0102 / PNP0C50) ─────────────────────
+	 * SSDT: SNMU on I2C1 @ 0x28
+	 * HID: MSHW0102 (Microsoft Surface Hardware)
+	 * CID: PNP0C50 (HID-over-I2C)
+	 * Contains: accelerometer, gyroscope (via HID sensor protocol)
+	 * Driver: hid-sensor-hub + i2c-hid-of
+	 *
+	 * Template:
+	 * &i2c1 {
+	 *     sensor_hub: sensor-hub@28 {
+	 *         compatible = "hid-over-i2c";
+	 *         reg = <0x28>;
+	 *         hid-descr-addr = <0x0001>;  // verify from WinRT dump
+	 *         // interrupt GPIO TBD
+	 *     };
+	 * };
+	 */
+
+	/*
+	 * ─── LID Sensor ──────────────────────────────────────────
+	 * DSDT: LID_ (PNP0C0D)
+	 * GPIOs: H3 (GPH3) + R4 (GPR4) — via GpioIo resources
+	 * State: LIDB (1 = open, 0 = closed)
+	 * Behavior: notifies LID_ (0x80) and TOUC (disables touch
+	 *           when Type Cover folded back)
+	 * Driver: gpio-keys
+	 *
+	 * Template:
+	 * lid-switch {
+	 *     compatible = "gpio-keys";
+	 *     lid {
+	 *         label = "Lid";
+	 *         gpios = <&gpio TEGRA_GPIO(H, 3) GPIO_ACTIVE_LOW>;
+	 *         linux,input-type = <5>;  // EV_SW
+	 *         linux,code = <0>;        // SW_LID
+	 *         wakeup-source;
+	 *     };
+	 * };
+	 */
+
+	/*
 	 * ─── PMIC (TI TPS65913 / Palmas) ─────────────────────────
 	 * DSDT: I2C4 at 0x7000C700 or I2C5 at 0x7000D000
 	 * Driver: palmas (tps65913)
@@ -91,12 +132,21 @@
 
 	/*
 	 * ─── USB Controllers ──────────────────────────────────────
-	 * DSDT: USB1 at 0x7D000000 (EHCI, NVDA0203, PNP0D20)
-	 * DSDT: USB2 at 0x7D004000 (EHCI+HSIC, internal)
-	 * DSDT: USB3 at 0x7D008000 (EHCI+HSIC, internal)
-	 * DSDT: XUSB at 0x70090000 (xHCI, NVDA0214, PNP0D10)
+	 * USB1: 0x7D000000 (EHCI) — EXTERNAL port, standard host mode
+	 *       UMOD register at offset 0x1A4 for host/device mode
+	 * USB2: 0x7D004000 (EHCI+HSIC) — INTERNAL only
+	 *       ACPI has debug: "USB2 _STA forced off"
+	 *       STAF=0xF0 force-disables; controlled by ^^US2E flag
+	 *       Complex HSIC PHY init via WRF_/WRR_ methods
+	 * USB3: 0x7D008000 (EHCI+HSIC) — INTERNAL only
+	 *       Has MRIN (modem reset init) + BBEN (baseband enable)
+	 *       Likely connects to nothing on Wi-Fi-only Surface 2
+	 * XUSB: 0x70090000 (xHCI, NVDA0214, PNP0D10) — unreliable
+	 *       PHY at 0x50041000
+	 *
 	 * Driver: ehci-tegra, tegra-xhci
-	 * NOTE: USB is known to be unreliable on Surface 2
+	 * For Linux: use USB1 (external) only; USB2/USB3 HSIC
+	 * can be disabled in DTS. xHCI is unreliable.
 	 */
 
 	/*
@@ -110,11 +160,20 @@
 	 * ─── Thermal ──────────────────────────────────────────────
 	 * DSDT: THEM (NVDAF300) at 0x700E2000
 	 * Driver: tegra-soctherm
+	 *
+	 * SSDT defines 4 thermal zones:
+	 *   TZ01: CPU/GPU die temp (IR Thermal via THEM)
+	 *   TZ02: Secondary zone (THEM)
+	 *   TZ03: Backlight temp (I2C3 sensor, DHTH)
+	 *   TZ04: "LTE Thermal" (odd for Wi-Fi-only device, I2C3)
+	 *
+	 * Thresholds: _CRT=90°C (shutdown), _PSV=65°C (passive)
+	 * HTMP flag: when set, uses "Dev Kit" params instead of prod
 	 */
 
 	/*
 	 * ─── I2C Buses ────────────────────────────────────────────
-	 * I2C1: 0x7000C000 (IRQ 70)  — Touchscreen + Sensors (SEN1)
+	 * I2C1: 0x7000C000 (IRQ 70)  — Touchscreen + Sensor hub (SNMU/MSHW0102 @ 0x28)
 	 * I2C2: 0x7000C400 (IRQ 116) — Audio codec (WM8962 @ 0x4B?)
 	 * I2C3: 0x7000C500 (IRQ 124) — Misc peripherals
 	 * I2C4: 0x7000C700 (IRQ 152) — Misc peripherals
@@ -126,8 +185,12 @@
 	 * All use NVDA0101 HID
 	 *
 	 * Other devices found in SSDT:
-	 *   BTH0 (NVDAF000) — Bluetooth on UART3
-	 *   GPSD (MSHW0010) — Microsoft Surface sensor hub
+	 *   BTH0 (NVDAF000) — Bluetooth on UART3 (0x70006200)
+	 *     Marvell combo chip shared with 88W8797 Wi-Fi
+	 *     Driver: btmrvl / hci_uart
+	 *   GPSD (MSHW0010) — Microsoft virtual location service
+	 *   RTCD — Palmas RTC (palmas-rtc) on I2C5, via RTCF field
+	 *   LCD0 — Display panel, dual DSI (DSIB), backlight via BKLG/DSLG
 	 */
 
 	/*

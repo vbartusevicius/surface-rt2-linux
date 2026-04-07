@@ -2,7 +2,7 @@
 
 Run Linux on the **Microsoft Surface 2** tablet (NVIDIA Tegra 4 T114, ARM32).
 
-Uses the [Open-Surface-RT/grate-linux](https://github.com/Open-Surface-RT/grate-linux/tree/microsoft-surface-2) kernel, EFI stub boot, and an initramfs-based installer.
+This repository follows the guide written by [Andrew Lee](https://www.andrewjameslee.com/2025/03/running-linux-on-microsoft-surface-2-rt.html), with additional hardware analysis from ACPI dumps and the [Open Surface RT](https://open-rt.gitbook.io/open-surfacert) community. It uses the [Open-Surface-RT/grate-linux](https://github.com/Open-Surface-RT/grate-linux/tree/microsoft-surface-2) kernel, EFI stub boot, and an initramfs-based installer.
 
 > **Technical details** — hardware map, ACPI/DSDT/SSDT analysis, GPIO pins, power rails, known issues — are in [`docs/hardware-analysis.md`](docs/hardware-analysis.md).
 >
@@ -117,7 +117,6 @@ surface-rt2-linux/
 - [Open Surface RT GitBook](https://open-rt.gitbook.io/open-surfacert) — community wiki
 - [grate-linux `microsoft-surface-2` branch](https://github.com/Open-Surface-RT/grate-linux/tree/microsoft-surface-2) — kernel
 - [grate-driver](https://github.com/grate-driver) — Tegra 2/3/4 open-source GPU
-- [Andrew Lee's guide](https://www.andrewjameslee.com/2025/03/running-linux-on-microsoft-surface-2-rt.html)
 - [Open-RT Discord](https://discord.gg/VW75GmWa95)
 
 ## License
