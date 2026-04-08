@@ -381,8 +381,8 @@ and driver mappings that supersede any DSDT/SSDT analysis where they conflict.
 
 | Item | DSDT/SSDT Value | Live Registry Value | Impact |
 |------|----------------|--------------------|----|
-| **Touch I2C address** | (not specified) | **0x3B** | DTS `reg` property |
-| **Sensor hub I2C address** | 0x28 | **0x3D** | DTS `reg` property |
+| **Touch I2C address** | (not specified) | **0x3B** | Untested; upstream EFI DTS uses 0x4b on I2C2 (also doesn't work). Try 0x3B on I2C1 |
+| **Sensor hub I2C address** | 0x28 | **0x3D** | ⚠️ 0x28 is correct — proven by grate-linux upstream, Andrew, and Surface RT. 0x3D is ACPI `_CRS` encoding, not the I2C slave address |
 | **Active UARTs** | 5 (UAR1–UAR5) | 3 (A, C, D) | UART-B/E can be omitted from DTS |
 | **Active SDIO slots** | 4 (SDM1–SDM4) | 3 (0, 2, 3) | SDM2 disabled/absent |
 | **WiFi/SD slot mapping** | SDM1=SD, SDM3=WiFi (assumed) | **SDM1=WiFi, SDM3=SD** | Confirmed by Andrew's tested DTS. SDMMC3 disabled (UART-A pin conflict) |

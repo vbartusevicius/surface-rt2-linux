@@ -134,20 +134,17 @@
 		status = "okay";
 	};
 
-	/* --- I2C1: Sensor Hub (+ Touch/Cover via hotplug) --------------- */
+	/* --- I2C1: Sensor Hub + Touchscreen (+ Cover via hotplug) ------- */
 	/* REGISTRY: NVDA0101\1 at 0x7000C000, IRQ 70 */
 	i2c@7000c000 {
 		status = "okay";
 		clock-frequency = <400000>;
 
-		/* Sensor hub / HID collection at 0x28
-		 * Source: Andrew (tested, works)
-		 * CONFLICT: Registry says MSHW0102 sensor hub is at 0x3D.
-		 *   Andrew's 0x28 boots and works -- keep it.
-		 *   The 0x28 may be a shared HID collection address.
-		 *   Try changing to 0x3D if sensor data is wrong.
-		 * REGISTRY also shows MSHW0100 touch at 0x3B on I2C1.
-		 *   Andrew puts touch on I2C2 instead (see below). */
+		/* Sensor hub (MSHW0102) — HID-over-I2C at 0x28
+		 * Source: grate-linux upstream + Andrew (tested, works)
+		 * Same address used on Surface RT (Tegra30).
+		 * Registry shows 0x3D but that's the ACPI _CRS encoding;
+		 * the actual I2C slave address is 0x28 (proven on hardware). */
 		sensor@28 {
 			compatible = "hid-over-i2c";
 			reg = <0x28>;
@@ -155,28 +152,39 @@
 			interrupt-parent = <&gpio>;
 			interrupts = <TEGRA_GPIO(BB, 6) IRQ_TYPE_LEVEL_LOW>;
 		};
+
+		/* Touchscreen (MSHW0100) — registry address 0x3B on I2C1.
+		 * Upstream EFI DTS had 0x4b on I2C2 but that never worked.
+		 * Registry confirms MSHW0100 at 0x3B — trying here instead. */
+		touch@3b {
+			compatible = "hid-over-i2c";
+			reg = <0x3b>;
+			hid-descr-addr = <0x0000>;
+			interrupt-parent = <&gpio>;
+			interrupts = <TEGRA_GPIO(O, 6) IRQ_TYPE_LEVEL_LOW>;
+			/* vdd-supply = <&touchscreen_reg>; */
+		};
 	};
 
-	/* --- I2C2: Touchscreen ------------------------------------------ */
+	/* --- I2C2 -------------------------------------------------------- */
 	/* REGISTRY: NVDA0101\2 at 0x7000C400, IRQ 116
-	 * Source: Andrew EFI DTS -- touch at 0x4b on I2C2
-	 * Andrew's note: "Doesn't work for APX. Device doesn't show up
-	 *   at all or disconnects"
-	 * CONFLICT: Registry says MSHW0100 touch is at 0x3B on I2C1.
-	 *   Both addresses may be valid depending on boot mode (EFI vs APX).
-	 *   TODO: Test 0x3B on I2C1 if 0x4b on I2C2 doesn't work. */
+	 * Upstream EFI DTS had touchscreen@4b here but it never worked.
+	 * Andrew: "Doesn't work for APX. Device doesn't show up at all
+	 * or disconnects." Touch moved to I2C1@0x3B (registry address).
+	 * Re-enable this if 0x4b/I2C2 turns out to be correct after all. */
 	i2c@7000c400 {
 		status = "okay";
-		clock-frequency = <100000>;
+		clock-frequency = <400000>;
 
+		/*
 		touchscreen@4b {
 			compatible = "hid-over-i2c";
 			reg = <0x4b>;
 			hid-descr-addr = <0x0000>;
 			interrupt-parent = <&gpio>;
 			interrupts = <TEGRA_GPIO(O, 6) IRQ_TYPE_LEVEL_LOW>;
-			/* vdd-supply = <&touchscreen_reg>; */
 		};
+		*/
 	};
 
 	/* --- I2C3: Audio codec + Temperature sensor --------------------- */
