@@ -90,10 +90,7 @@ sudo ./scripts/prepare-usb.sh /dev/sdX
 Use Docker to build the image (no native tools needed):
 
 ```bash
-docker run --rm -it --privileged \
-  -v "$PWD/output:/work/output" \
-  surface2-build \
-  bash /work/scripts/prepare-usb.sh /work/output/surface2-installer.img
+docker run --rm -it --privileged -v "$PWD/output:/work/output" surface2-build bash /work/scripts/prepare-usb.sh /work/output/surface2-installer.img
 
 # Then flash from macOS using dd:
 diskutil list
