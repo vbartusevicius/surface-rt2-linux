@@ -7,26 +7,11 @@
 CONFIG_EFI=y
 CONFIG_EFI_STUB=y
 CONFIG_CMDLINE_FROM_BOOTLOADER=y
-# EFI stub loads DTB from dtb=\file.dtb on the kernel command line.
-# This is the primary DTB delivery method — allows swapping DTB files
-# on the FAT partition without rebuilding boot.efi.
 CONFIG_EFI_ARMSTUB_DTB_LOADER=y
 
 # ─── grate-linux Windows RT support ──────────────────────────────
-# These are grate-linux-specific options (not in mainline).
-# CONFIG_WINDOWS_RT enables WinRT device identification in the EFI stub.
-# CONFIG_WINDOWS_RT_SECUREBOOT_SKIP is CRITICAL: without it, the EFI stub
-# refuses to load dtb= when Secure Boot is reported as enabled by firmware.
-# Even with Yahallo jailbreak, the firmware still reports SB as "enabled" —
-# so dtb= is silently ignored and you get "Generating empty DTB".
 CONFIG_WINDOWS_RT=y
 CONFIG_WINDOWS_RT_SECUREBOOT_SKIP=y
-# CONFIG_CMDLINE_FROM_FILE: reads cmdline.txt from the FAT partition and
-# REPLACES image->load_options before any parsing.  This is REQUIRED because
-# the Yahallo EFI Shell does NOT pass command-line arguments via load_options
-# to the loaded EFI application — so dtb=, initrd=, and root= from
-# startup.nsh never reach the EFI stub.  cmdline.txt is the only working
-# delivery mechanism.  The file must exist on the FAT root next to boot.efi.
 CONFIG_CMDLINE_FROM_FILE=y
 
 # ─── Device Tree ───────────────────────────────────────────────────
@@ -38,7 +23,11 @@ CONFIG_DRM=y
 CONFIG_DRM_TEGRA=y
 CONFIG_DRM_PANEL=y
 CONFIG_DRM_PANEL_SIMPLE=y
+CONFIG_DRM_PANEL_SAMSUNG_106HL02=y
+CONFIG_DRM_MIPI_DSI=y
 CONFIG_DRM_BRIDGE=y
+CONFIG_BACKLIGHT_CLASS_DEVICE=y
+CONFIG_BACKLIGHT_PWM=y
 CONFIG_FB=y
 CONFIG_FRAMEBUFFER_CONSOLE=y
 CONFIG_FRAMEBUFFER_CONSOLE_DETECT_PRIMARY=y
@@ -53,8 +42,6 @@ CONFIG_MWIFIEX_SDIO=m
 # Firmware: /lib/firmware/mrvl/sd8797_uapsta.bin
 
 # ─── Bluetooth (Marvell AVASTAR combo chip, UART transport) ──────
-# ACPI: NVDAF000 on UART-C (0x70006200), WinRT driver: mbtu97w8
-# Firmware: /lib/firmware/mrvl/sd8797_uapsta.bin (shared with Wi-Fi)
 CONFIG_BT=m
 CONFIG_BT_HCIUART=m
 CONFIG_BT_HCIUART_MARVELL=m
@@ -99,8 +86,6 @@ CONFIG_REGULATOR_TPS65090=y
 # Generic power supply + battery
 CONFIG_POWER_SUPPLY=y
 CONFIG_BATTERY_SBS=m
-# Note: Surface 2 battery uses I2C RSPB protocol (CmBatt in WinRT).
-# SBS is the closest standard; may need custom driver if SBS doesn't work.
 
 # ─── Storage ──────────────────────────────────────────────────────
 CONFIG_MMC=y

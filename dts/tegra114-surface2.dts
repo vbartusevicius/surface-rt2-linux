@@ -48,9 +48,10 @@
 			panel@0 {
 				compatible = "samsung,106hl02";
 				reg = <0>;
+				power-supply = <&tps65090_fet4>;
 				backlight = <&backlight>;
-				/* Power supply unclear -- Andrew notes FET4 needed
-				 * but regulator connection TBD */
+				/* Andrew: "FET4 doesn't control backlight but it is
+				 * needed for the display to work" */
 			};
 		};
 
