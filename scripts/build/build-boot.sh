@@ -56,33 +56,30 @@ assemble_boot() {
     info "Assembling boot files (DTB=$DTB_NAME) ..."
 
     # Create startup.nsh — EFI Shell script executed on boot.
-    # NOTE: On Surface 2, the Yahallo EFI Shell does NOT pass these arguments
-    # to the kernel via load_options. The kernel actually reads cmdline.txt
-    # (see below). startup.nsh is still needed to launch the kernel image.
-    cat > "$BOOT_DIR/startup.nsh" << STARTUP
+    # NOTE: Yahallo does NOT pass arguments to the kernel. startup.nsh just
+    # launches boot.efi. All real parameters come from cmdline.txt.
+    cat > "$BOOT_DIR/startup.nsh" << 'STARTUP'
 fs0:
-\boot.efi initrd=\initrd.gz dtb=\\${DTB_NAME} root=/dev/ram0 init=/init console=tty0 earlyprintk loglevel=7
+boot.efi
 STARTUP
 
     # Create cmdline.txt — REQUIRED for Surface 2.
-    # The Yahallo EFI Shell does not pass command-line arguments via
-    # loaded_image->load_options to the kernel EFI stub. Without this file,
-    # dtb=, initrd=, root= are never seen → "Generating empty DTB".
-    # CONFIG_CMDLINE_FROM_FILE=y reads this file and REPLACES load_options.
-    # Must be plain ASCII, single line, no trailing newline issues.
+    # CONFIG_CMDLINE_FROM_FILE=y reads this and REPLACES load_options.
+    # Format must match the proven bootfiles+kernel.zip exactly:
+    # no backslashes, console=tty1, cpuidle.off=1.
     cat > "$BOOT_DIR/cmdline.txt" << CMDLINE
-dtb=\\${DTB_NAME} initrd=\initrd.gz root=/dev/ram0 init=/init console=tty0 earlyprintk loglevel=7
+dtb=${DTB_NAME} initrd=initrd.gz root=/dev/ram0 init=/init console=tty1 cpuidle.off=1 rootwait rw
 CMDLINE
 
-    # Create post-install startup.nsh (boot from eMMC)
-    cat > "$BOOT_DIR/startup-emmc.nsh" << STARTUP_EMMC
+    # Create post-install startup.nsh (same — just launches boot.efi)
+    cat > "$BOOT_DIR/startup-emmc.nsh" << 'STARTUP_EMMC'
 fs0:
-\boot.efi dtb=\\${DTB_NAME} root=/dev/mmcblk0p5 rootfstype=ext4 rootwait console=tty0 earlyprintk loglevel=7
+boot.efi
 STARTUP_EMMC
 
     # Post-install cmdline.txt for eMMC boot
     cat > "$BOOT_DIR/cmdline-emmc.txt" << CMDLINE_EMMC
-dtb=\\${DTB_NAME} root=/dev/mmcblk0p5 rootfstype=ext4 rootwait console=tty0 earlyprintk loglevel=7
+dtb=${DTB_NAME} root=/dev/mmcblk0p5 rootfstype=ext4 console=tty1 cpuidle.off=1 rootwait rw
 CMDLINE_EMMC
 
     info "Boot files assembled in $BOOT_DIR"

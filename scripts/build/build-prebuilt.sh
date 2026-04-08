@@ -1,70 +1,62 @@
 #!/bin/bash
-# build-prebuilt.sh — Download pre-built kernel + modules from open-rt.party
+# build-prebuilt.sh — Download pre-built boot files from open-rt.party
 # Sourced by build.sh — do not run directly.
 #
-# Uses the same kernel and DTB that Andrew Lee's guide references.
-# See: https://www.andrewjameslee.com/2025/03/running-linux-on-microsoft-surface-2-rt.html
+# Downloads surface-2-bootfiles+kernel.zip which contains the proven
+# 5.17.0-rc4 kernel, DTB, and modules that work on Surface 2.
 
-PREBUILT_BASE_URL="https://files.open-rt.party/Linux-Kernel-Download/surface-2/2022-02-10"
-PREBUILT_ZIMAGE="s2-zImage-5.17.0-rc3-next-20220207-Open-Surface-RT-g140d9605476d"
-PREBUILT_MODULES="s2-modules-5.17.0-rc3-next-20220207-Open-Surface-RT-g140d9605476d.tar.xz"
-PREBUILT_DTB="tegra114-microsoft-surface-2.dtb"
+PREBUILT_ZIP_URL="https://files.open-rt.party/Linux/Other/surface-2-bootfiles%2Bkernel.zip"
 
-# ─── Download pre-built kernel, DTB, modules ──────────────────────
+# ─── Download and extract pre-built boot files ────────────────────
 download_prebuilt() {
-    info "Downloading pre-built Surface 2 kernel from open-rt.party ..."
+    info "Downloading pre-built Surface 2 boot files from open-rt.party ..."
     mkdir -p "$BOOT_DIR" "$STAGING_DIR"
 
-    # Download kernel (zImage → boot.efi)
-    if [ ! -f "$BOOT_DIR/boot.efi" ]; then
-        info "Downloading kernel (zImage) ..."
-        wget --progress=bar:force -O "$BOOT_DIR/boot.efi" \
-            "$PREBUILT_BASE_URL/$PREBUILT_ZIMAGE" || \
-            error "Failed to download kernel from $PREBUILT_BASE_URL/$PREBUILT_ZIMAGE"
-        info "boot.efi downloaded ($(du -h "$BOOT_DIR/boot.efi" | cut -f1))"
+    # Download the zip if not cached
+    local ZIP="/tmp/surface-2-bootfiles-kernel.zip"
+    if [ ! -f "$ZIP" ]; then
+        info "Downloading surface-2-bootfiles+kernel.zip ..."
+        wget --progress=bar:force -O "$ZIP" "$PREBUILT_ZIP_URL" || \
+            error "Failed to download from $PREBUILT_ZIP_URL"
     else
-        info "Using cached boot.efi"
+        info "Using cached zip"
     fi
 
-    # Download DTB
-    if [ ! -f "$BOOT_DIR/$PREBUILT_DTB" ]; then
-        info "Downloading device tree ($PREBUILT_DTB) ..."
-        wget --progress=bar:force -O "$BOOT_DIR/$PREBUILT_DTB" \
-            "$PREBUILT_BASE_URL/$PREBUILT_DTB" || \
-            error "Failed to download DTB"
-        info "DTB downloaded"
+    # Extract to a temp dir, then copy what we need
+    local TMP_DIR
+    TMP_DIR=$(mktemp -d)
+    info "Extracting zip ..."
+    python3 -c "
+import zipfile, sys
+with zipfile.ZipFile(sys.argv[1]) as z:
+    z.extractall(sys.argv[2])
+" "$ZIP" "$TMP_DIR"
+
+    # Copy boot.efi and DTB
+    cp "$TMP_DIR/boot.efi" "$BOOT_DIR/"
+    info "boot.efi copied ($(du -h "$BOOT_DIR/boot.efi" | cut -f1))"
+
+    local dtb
+    dtb=$(ls "$TMP_DIR"/tegra114*.dtb 2>/dev/null | head -1)
+    if [ -n "$dtb" ]; then
+        DTB_NAME=$(basename "$dtb")
+        cp "$dtb" "$BOOT_DIR/"
+        info "DTB copied: $DTB_NAME"
     else
-        info "Using cached $PREBUILT_DTB"
+        error "No DTB found in zip"
     fi
 
-    # Download and extract kernel modules
-    if [ ! -d "$STAGING_DIR/lib/modules" ] || \
-       [ -z "$(ls -A "$STAGING_DIR/lib/modules" 2>/dev/null)" ]; then
-        info "Downloading kernel modules ..."
-        local TMP_TAR="/tmp/$PREBUILT_MODULES"
-        wget --progress=bar:force -O "$TMP_TAR" \
-            "$PREBUILT_BASE_URL/$PREBUILT_MODULES" || \
-            error "Failed to download modules"
-
-        info "Extracting modules ..."
-        local TMP_DIR
-        TMP_DIR=$(mktemp -d)
-        tar xf "$TMP_TAR" -C "$TMP_DIR"
-
-        # Handle different tarball layouts:
-        # Layout A: lib/modules/<version>/...
-        # Layout B: <version>/kernel/...  (just the modules dir contents)
-        mkdir -p "$STAGING_DIR/lib/modules"
-        if [ -d "$TMP_DIR/lib/modules" ]; then
-            cp -a "$TMP_DIR/lib/modules/"* "$STAGING_DIR/lib/modules/"
-        else
-            # Assume tarball contains the version directory directly
-            cp -a "$TMP_DIR"/* "$STAGING_DIR/lib/modules/"
-        fi
-
-        rm -rf "$TMP_DIR" "$TMP_TAR"
-        info "Modules extracted to $STAGING_DIR/lib/modules/"
+    # Copy modules (directory named after kernel version)
+    mkdir -p "$STAGING_DIR/lib/modules"
+    local mod_dir
+    mod_dir=$(ls -d "$TMP_DIR"/5.17.0-* 2>/dev/null | head -1)
+    if [ -n "$mod_dir" ] && [ -d "$mod_dir" ]; then
+        cp -a "$mod_dir" "$STAGING_DIR/lib/modules/"
+        info "Modules copied: $(basename "$mod_dir")"
     else
-        info "Using cached modules in $STAGING_DIR/lib/modules/"
+        warn "No modules directory found in zip"
     fi
+
+    rm -rf "$TMP_DIR"
+    info "Pre-built files ready"
 }
