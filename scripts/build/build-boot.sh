@@ -58,11 +58,6 @@ fs0:
 \boot.efi initrd=\initrd.gz dtb=\tegra114-surface2.dtb root=/dev/ram0 init=/init console=tty0 earlyprintk loglevel=7
 STARTUP
 
-    # Create commandline.txt (Raspberry Pi boot style, alternative)
-    cat > "$BOOT_DIR/commandline.txt" << 'CMDLINE'
-initrd=initrd.gz root=/dev/ram0 init=/init console=tty0 earlyprintk loglevel=7
-CMDLINE
-
     # Create post-install startup.nsh (boot from eMMC)
     cat > "$BOOT_DIR/startup-emmc.nsh" << 'STARTUP_EMMC'
 fs0:

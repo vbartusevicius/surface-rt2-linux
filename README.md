@@ -192,7 +192,8 @@ cat /sys/class/power_supply/*/uevent
 
 | Problem | Fix |
 |---------|-----|
-| Black screen | Add `earlyprintk loglevel=7` to cmdline, check `dtb=` path |
+| "Generating empty DTB" then hang | Kernel ignores `dtb=` due to Secure Boot check. Ensure `CONFIG_WINDOWS_RT=y` and `CONFIG_WINDOWS_RT_SECUREBOOT_SKIP=y` in defconfig and rebuild kernel |
+| Black screen | Add `earlyprintk loglevel=7` to cmdline, check `dtb=` path matches filename on FAT partition |
 | No Wi-Fi | Check `/lib/firmware/mrvl/sd8797_uapsta.bin` exists |
 | No touch | Verify I2C1 HID node in DTS; try `atmel_mxt_ts` driver |
 | USB flaky | Known ACPI issue — USB2/USB3 use HSIC, see hardware analysis |

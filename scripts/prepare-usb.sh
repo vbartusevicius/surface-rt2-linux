@@ -222,7 +222,6 @@ info "Copying boot files..."
 cp -v "$BOOT_DIR/boot.efi"        "$MNT/"
 cp -v "$BOOT_DIR/initrd.gz"       "$MNT/" 2>/dev/null || true
 cp -v "$BOOT_DIR/startup.nsh"     "$MNT/" 2>/dev/null || true
-cp -v "$BOOT_DIR/commandline.txt" "$MNT/" 2>/dev/null || true
 cp -v "$BOOT_DIR/startup-emmc.nsh" "$MNT/" 2>/dev/null || true
 
 for dtb in "$BOOT_DIR"/*.dtb; do

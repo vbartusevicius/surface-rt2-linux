@@ -12,6 +12,16 @@ CONFIG_CMDLINE_FROM_BOOTLOADER=y
 # on the FAT partition without rebuilding boot.efi.
 CONFIG_EFI_ARMSTUB_DTB_LOADER=y
 
+# ─── grate-linux Windows RT support ──────────────────────────────
+# These are grate-linux-specific options (not in mainline).
+# CONFIG_WINDOWS_RT enables WinRT device identification in the EFI stub.
+# CONFIG_WINDOWS_RT_SECUREBOOT_SKIP is CRITICAL: without it, the EFI stub
+# refuses to load dtb= when Secure Boot is reported as enabled by firmware.
+# Even with Yahallo jailbreak, the firmware still reports SB as "enabled" —
+# so dtb= is silently ignored and you get "Generating empty DTB".
+CONFIG_WINDOWS_RT=y
+CONFIG_WINDOWS_RT_SECUREBOOT_SKIP=y
+
 # ─── Device Tree ───────────────────────────────────────────────────
 CONFIG_OF=y
 CONFIG_OF_OVERLAY=y
