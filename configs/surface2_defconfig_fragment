@@ -24,6 +24,7 @@ CONFIG_OF_OVERLAY=y
 # DRM_TEGRA reclaims display hardware and fails to reinitialize DSI
 # → black screen. Disable it and use simplefb to preserve the
 # EFI-initialized framebuffer (matches resizepart-emmc.zip behavior).
+# CONFIG_DRM is not set
 # CONFIG_DRM_TEGRA is not set
 CONFIG_SYSFB=y
 CONFIG_SYSFB_SIMPLEFB=y

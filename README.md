@@ -44,19 +44,32 @@ cd surface-rt2-linux
 
 # Build cross-compilation container (one-time)
 docker build -t surface2-build .
-
-# Full build: kernel + DTB + initramfs (~30 min, first time)
 mkdir -p output
+```
+
+### Option A: Pre-built kernel (recommended first time)
+
+Downloads the proven kernel + DTB + modules from [open-rt.party](https://files.open-rt.party/),
+builds only the initramfs installer locally. **~2 min, no kernel compilation.**
+
+```bash
+docker run --rm -v "$PWD/output:/work/output" surface2-build prebuilt
+```
+
+### Option B: Full custom build
+
+Compiles the kernel from source with your own defconfig fragment and custom DTS.
+
+```bash
 docker run --rm -v "$PWD/output:/work/output" surface2-build
 ```
 
-### Incremental builds
-
-After the first full build, use these to iterate faster:
+### All build commands
 
 | Command | What it does | Time |
 |---------|-------------|------|
 | `./build.sh` | Full build (clone + compile + package) | ~30 min |
+| `./build.sh prebuilt` | Download pre-built kernel + build initramfs | ~2 min |
 | `./build.sh dtb` | Rebuild DTB only | seconds |
 | `./build.sh boot` | Rebuild DTB + reassemble boot files | seconds |
 | `./build.sh quick` | Everything except kernel compile | ~2 min |
@@ -220,7 +233,8 @@ cat /sys/class/power_supply/*/uevent
 | No touch | Verify I2C1 HID node in DTS; try `atmel_mxt_ts` driver |
 | USB flaky | Known ACPI issue — USB2/USB3 use HSIC, see hardware analysis |
 | Kernel panic | Check `root=` partition number, verify ext4 on p5 |
-| Re-runs installer on reboot | Replace `startup.nsh` with `startup-emmc.nsh` on USB (see Step 5) |
+| "waiting for root device /dev/ram0" | `initrd.gz` is missing from the USB. The installer cmdline uses `root=/dev/ram0` which requires an initramfs. Run `./build.sh prebuilt` and `prepare-usb.sh` to create a complete USB. |
+| Re-runs installer on reboot | Replace **both** `startup.nsh` and `cmdline.txt` with their `-emmc` versions (see Step 5) |
 
 ## Alternative: Pre-built boot files
 

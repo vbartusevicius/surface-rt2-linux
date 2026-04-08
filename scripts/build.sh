@@ -3,6 +3,7 @@
 #
 # Commands:
 #   ./build.sh              Full build: clone, compile, package (30+ min)
+#   ./build.sh prebuilt     Download pre-built kernel from open-rt.party (~2 min)
 #   ./build.sh dtb          Rebuild DTB only, copy to output   (seconds)
 #   ./build.sh boot         Rebuild DTB + reassemble boot files (seconds)
 #   ./build.sh quick        Everything except kernel compile    (~2 min)
@@ -26,6 +27,9 @@ SCRIPTS_DIR="$WORK/scripts/build"
 KERNEL_REPO="https://github.com/Open-Surface-RT/grate-linux.git"
 KERNEL_BRANCH="microsoft-surface-2"
 
+# DTB filename — overridden by prebuilt mode
+DTB_NAME="${DTB_NAME:-tegra114-surface2.dtb}"
+
 NPROC=$(nproc)
 
 export ARCH=arm
@@ -40,6 +44,7 @@ error() { echo -e "\033[1;31m[ERROR]\033[0m $*"; exit 1; }
 source "$SCRIPTS_DIR/build-kernel.sh"
 source "$SCRIPTS_DIR/build-initramfs.sh"
 source "$SCRIPTS_DIR/build-boot.sh"
+source "$SCRIPTS_DIR/build-prebuilt.sh"
 source "$SCRIPTS_DIR/build-verify.sh"
 
 # ─── Command definitions ────────────────────────────────────────────
@@ -54,7 +59,20 @@ cmd_full() {
     configure_kernel
     build_kernel
     install_modules
+    copy_kernel_efi
     build_dtb
+    build_initramfs
+    assemble_boot
+    copy_firmware
+    verify_output || true
+}
+
+cmd_prebuilt() {
+    info "=== Pre-built kernel (Andrew Lee's method) ==="
+    DTB_NAME="tegra114-microsoft-surface-2.dtb"
+    rm -rf "$BOOT_DIR" "$STAGING_DIR"
+    mkdir -p "$BOOT_DIR" "$STAGING_DIR"
+    download_prebuilt
     build_initramfs
     assemble_boot
     copy_firmware
@@ -104,6 +122,7 @@ Usage: $0 [COMMAND]
 
 Commands:
   (none)    Full build: clone, compile, package         (~30 min)
+  prebuilt  Download pre-built kernel from open-rt.party (~2 min)
   dtb       Rebuild DTB only, copy to output            (seconds)
   boot      Rebuild DTB + reassemble boot files         (seconds)
   quick     Skip kernel compile, rebuild everything else (~2 min)
@@ -126,6 +145,7 @@ CMD="${1:-full}"
 
 case "$CMD" in
     full|"")  ;;
+    prebuilt) ;;
     dtb)      ;;
     boot)     ;;
     quick)    ;;

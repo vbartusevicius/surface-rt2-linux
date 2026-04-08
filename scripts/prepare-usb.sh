@@ -224,6 +224,7 @@ cp -v "$BOOT_DIR/initrd.gz"       "$MNT/" 2>/dev/null || true
 cp -v "$BOOT_DIR/startup.nsh"     "$MNT/" 2>/dev/null || true
 cp -v "$BOOT_DIR/startup-emmc.nsh" "$MNT/" 2>/dev/null || true
 cp -v "$BOOT_DIR/cmdline.txt"     "$MNT/" 2>/dev/null || true
+cp -v "$BOOT_DIR/cmdline-emmc.txt" "$MNT/" 2>/dev/null || true
 
 for dtb in "$BOOT_DIR"/*.dtb; do
     [ -f "$dtb" ] && cp -v "$dtb" "$MNT/"

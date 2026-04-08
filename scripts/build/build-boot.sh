@@ -41,24 +41,27 @@ build_dtb() {
     done
 }
 
-# ─── Assemble boot files ────────────────────────────────────────
-assemble_boot() {
-    info "Assembling boot files ..."
+# ─── Copy compiled kernel as EFI binary ────────────────────────
+copy_kernel_efi() {
+    info "Copying kernel as boot.efi ..."
     cd "$KERNEL_DIR"
-
-    # Copy kernel as EFI binary (plain zImage, no appended DTB).
-    # The DTB is loaded separately via the dtb= command-line parameter.
-    # Requires CONFIG_EFI_ARMSTUB_DTB_LOADER=y in the kernel config.
     cp arch/arm/boot/zImage "$BOOT_DIR/boot.efi"
     info "boot.efi created ($(du -h "$BOOT_DIR/boot.efi" | cut -f1))"
+}
+
+# ─── Assemble boot files ────────────────────────────────────────
+# Uses $DTB_NAME (set by build.sh — defaults to tegra114-surface2.dtb,
+# prebuilt mode uses tegra114-microsoft-surface-2.dtb).
+assemble_boot() {
+    info "Assembling boot files (DTB=$DTB_NAME) ..."
 
     # Create startup.nsh — EFI Shell script executed on boot.
     # NOTE: On Surface 2, the Yahallo EFI Shell does NOT pass these arguments
     # to the kernel via load_options. The kernel actually reads cmdline.txt
     # (see below). startup.nsh is still needed to launch the kernel image.
-    cat > "$BOOT_DIR/startup.nsh" << 'STARTUP'
+    cat > "$BOOT_DIR/startup.nsh" << STARTUP
 fs0:
-\boot.efi initrd=\initrd.gz dtb=\tegra114-surface2.dtb root=/dev/ram0 init=/init console=tty0 earlyprintk loglevel=7
+\boot.efi initrd=\initrd.gz dtb=\\${DTB_NAME} root=/dev/ram0 init=/init console=tty0 earlyprintk loglevel=7
 STARTUP
 
     # Create cmdline.txt — REQUIRED for Surface 2.
@@ -67,19 +70,19 @@ STARTUP
     # dtb=, initrd=, root= are never seen → "Generating empty DTB".
     # CONFIG_CMDLINE_FROM_FILE=y reads this file and REPLACES load_options.
     # Must be plain ASCII, single line, no trailing newline issues.
-    cat > "$BOOT_DIR/cmdline.txt" << 'CMDLINE'
-dtb=\tegra114-surface2.dtb initrd=\initrd.gz root=/dev/ram0 init=/init console=tty0 earlyprintk loglevel=7
+    cat > "$BOOT_DIR/cmdline.txt" << CMDLINE
+dtb=\\${DTB_NAME} initrd=\initrd.gz root=/dev/ram0 init=/init console=tty0 earlyprintk loglevel=7
 CMDLINE
 
     # Create post-install startup.nsh (boot from eMMC)
-    cat > "$BOOT_DIR/startup-emmc.nsh" << 'STARTUP_EMMC'
+    cat > "$BOOT_DIR/startup-emmc.nsh" << STARTUP_EMMC
 fs0:
-\boot.efi dtb=\tegra114-surface2.dtb root=/dev/mmcblk0p5 rootfstype=ext4 rootwait console=tty0 earlyprintk loglevel=7
+\boot.efi dtb=\\${DTB_NAME} root=/dev/mmcblk0p5 rootfstype=ext4 rootwait console=tty0 earlyprintk loglevel=7
 STARTUP_EMMC
 
     # Post-install cmdline.txt for eMMC boot
-    cat > "$BOOT_DIR/cmdline-emmc.txt" << 'CMDLINE_EMMC'
-dtb=\tegra114-surface2.dtb root=/dev/mmcblk0p5 rootfstype=ext4 rootwait console=tty0 earlyprintk loglevel=7
+    cat > "$BOOT_DIR/cmdline-emmc.txt" << CMDLINE_EMMC
+dtb=\\${DTB_NAME} root=/dev/mmcblk0p5 rootfstype=ext4 rootwait console=tty0 earlyprintk loglevel=7
 CMDLINE_EMMC
 
     info "Boot files assembled in $BOOT_DIR"
