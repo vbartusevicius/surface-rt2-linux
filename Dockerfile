@@ -54,4 +54,5 @@ RUN apt-get update && apt-get install -y dos2unix && rm -rf /var/lib/apt/lists/*
 ENV ARCH=arm
 ENV CROSS_COMPILE=arm-linux-gnueabihf-
 
-CMD ["bash", "/work/scripts/build.sh"]
+ENTRYPOINT ["bash", "/work/scripts/build.sh"]
+CMD []
