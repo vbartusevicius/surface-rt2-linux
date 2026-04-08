@@ -16,7 +16,16 @@ This repository follows the guide written by [Andrew Lee](https://www.andrewjame
 
 ## Step 1 — Partition the eMMC (on Windows RT)
 
-Open Disk Management on the Surface 2 (`Win+X` → Disk Management):
+The eMMC needs free partitions for Linux. You can either:
+
+- **Use the pre-built repartitioning tool** from the Open Surface RT community:
+  Download [`surface-2-linux-resizepart-emmc.zip`](https://files.open-rt.party/Linux/Other/surface-2-linux-resizepart-emmc.zip),
+  copy its contents to a USB drive, and boot from it — it will shrink Windows and create the Linux partitions.
+
+- **Manual method** — Open Disk Management on the Surface 2 (`Win+X` → Disk Management):
+  shrink the Windows partition (~16 GB), delete the recovery partition, and create new partitions.
+
+Target eMMC layout:
 
 | # | Size | Format | Purpose |
 |---|------|--------|---------|
@@ -25,7 +34,7 @@ Open Disk Management on the Surface 2 (`Win+X` → Disk Management):
 | p5 | ~6 GB | ext4 | Linux root `/` |
 | p6 | ~5 GB | FAT32 | Staging (optional — only if not using USB) |
 
-Delete the recovery partition (p3) to free space.
+> See [Andrew Lee's guide](https://www.andrewjameslee.com/2025/03/running-linux-on-microsoft-surface-2-rt.html) for detailed step-by-step instructions with screenshots.
 
 ## Step 2 — Build (on your PC)
 
@@ -155,23 +164,29 @@ S2LINUX (FAT32):
 
 ## Step 5 — Switch to eMMC boot
 
-After the installer finishes, the USB still has `startup.nsh` in installer mode.
-To boot the installed system from eMMC, **edit `startup.nsh` on the USB**:
+After the installer finishes, the USB still has `startup.nsh` and `cmdline.txt` in
+installer mode. To boot the installed system from eMMC, **swap both files**:
 
 1. Mount the USB on any PC
-2. Replace `startup.nsh` with the post-install version:
+2. Replace the startup script **and** command line:
    ```bash
    # On Linux:
    cp /mnt/usb/startup-emmc.nsh /mnt/usb/startup.nsh
+   cp /mnt/usb/cmdline-emmc.txt /mnt/usb/cmdline.txt
    ```
-   Or on Windows/macOS, rename `startup-emmc.nsh` → `startup.nsh` (overwrite the old one).
+   On Windows/macOS: rename `startup-emmc.nsh` → `startup.nsh` and
+   `cmdline-emmc.txt` → `cmdline.txt` (overwrite the old ones).
 
-The two startup scripts differ in boot target:
+The files differ in boot target:
 
-| File | Boots | Kernel cmdline |
-|------|-------|---------------|
-| `startup.nsh` (default) | Installer initramfs | `root=/dev/ram0 init=/init` |
-| `startup-emmc.nsh` | eMMC partition 5 | `root=/dev/mmcblk0p5 rootfstype=ext4 rootwait` |
+| File pair | Boots | Root device |
+|-----------|-------|-------------|
+| `startup.nsh` + `cmdline.txt` (default) | Installer initramfs | `root=/dev/ram0 init=/init` |
+| `startup-emmc.nsh` + `cmdline-emmc.txt` | eMMC partition 5 | `root=/dev/mmcblk0p5 rootfstype=ext4 rootwait` |
+
+> **Important:** You must swap **both** `startup.nsh` and `cmdline.txt`. The kernel reads
+> parameters from `cmdline.txt` (not from startup.nsh arguments), so leaving the old
+> `cmdline.txt` will boot back into the installer.
 
 **To boot permanently without USB**, copy the boot files to the EFI System Partition (p1):
 
@@ -181,6 +196,7 @@ mount /dev/mmcblk0p1 /mnt/efi
 cp /mnt/usb/boot.efi /mnt/efi/
 cp /mnt/usb/*.dtb /mnt/efi/
 cp /mnt/usb/startup-emmc.nsh /mnt/efi/startup.nsh
+cp /mnt/usb/cmdline-emmc.txt /mnt/efi/cmdline.txt
 umount /mnt/efi
 ```
 
@@ -198,15 +214,27 @@ cat /sys/class/power_supply/*/uevent
 | Problem | Fix |
 |---------|-----|
 | "Generating empty DTB" then hang | Kernel ignores `dtb=` due to Secure Boot check. Ensure `CONFIG_WINDOWS_RT=y` and `CONFIG_WINDOWS_RT_SECUREBOOT_SKIP=y` in defconfig and rebuild kernel |
-| Black screen | Add `earlyprintk loglevel=7` to cmdline, check `dtb=` path matches filename on FAT partition |
+| Black screen after boot text | `CONFIG_DRM_TEGRA` takes over the EFI framebuffer and fails to reinitialize DSI. Disable it and use `CONFIG_FB_SIMPLE=y` + `CONFIG_SYSFB_SIMPLEFB=y` (already set in defconfig fragment). Rebuild kernel. |
 | No Wi-Fi | Check `/lib/firmware/mrvl/sd8797_uapsta.bin` exists |
 | No touch | Verify I2C1 HID node in DTS; try `atmel_mxt_ts` driver |
 | USB flaky | Known ACPI issue — USB2/USB3 use HSIC, see hardware analysis |
 | Kernel panic | Check `root=` partition number, verify ext4 on p5 |
 | Re-runs installer on reboot | Replace `startup.nsh` with `startup-emmc.nsh` on USB (see Step 5) |
 
+## Alternative: Pre-built boot files
+
+If you don't want to build the kernel yourself, pre-built files are available:
+
+- [`surface-2-bootfiles+kernel.zip`](https://files.open-rt.party/Linux/Other/surface-2-bootfiles%2Bkernel.zip) — kernel + DTB + boot scripts
+- [`surface-2-rpi-bookworm-bootfiles.zip`](https://files.open-rt.party/Linux/Distro/surface-2-rpi-bookworm-bootfiles.zip) — Bookworm boot files
+- [`surface-2-linux-resizepart-emmc.zip`](https://files.open-rt.party/Linux/Other/surface-2-linux-resizepart-emmc.zip) — eMMC repartitioning tool
+- [Pre-built kernel images](https://files.open-rt.party/Linux-Kernel-Download/surface-2/) — zImage + modules + DTB
+
+All hosted at [files.open-rt.party](https://files.open-rt.party/).
+
 ## Resources
 
+- [Andrew Lee's guide](https://www.andrewjameslee.com/2025/03/running-linux-on-microsoft-surface-2-rt.html) — step-by-step Surface 2 Linux install
 - [Open Surface RT GitBook](https://open-rt.gitbook.io/open-surfacert) — community wiki
 - [grate-linux `microsoft-surface-2` branch](https://github.com/Open-Surface-RT/grate-linux/tree/microsoft-surface-2) — kernel
 - [grate-driver](https://github.com/grate-driver) — Tegra 2/3/4 open-source GPU

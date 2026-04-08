@@ -18,19 +18,21 @@ CONFIG_CMDLINE_FROM_FILE=y
 CONFIG_OF=y
 CONFIG_OF_OVERLAY=y
 
-# ─── Display / DRM ─────────────────────────────────────────────────
-CONFIG_DRM=y
-CONFIG_DRM_TEGRA=y
-CONFIG_DRM_PANEL=y
-CONFIG_DRM_PANEL_SIMPLE=y
-CONFIG_DRM_PANEL_SAMSUNG_106HL02=y
-CONFIG_DRM_MIPI_DSI=y
-CONFIG_DRM_BRIDGE=y
-CONFIG_BACKLIGHT_CLASS_DEVICE=y
-CONFIG_BACKLIGHT_PWM=y
+# ─── Display ──────────────────────────────────────────────────────
+# The EFI firmware (via Yahallo) already initializes the DSI panel
+# (Samsung LTL106HL02, 1920x1080) and sets up a framebuffer.
+# DRM_TEGRA reclaims display hardware and fails to reinitialize DSI
+# → black screen. Disable it and use simplefb to preserve the
+# EFI-initialized framebuffer (matches resizepart-emmc.zip behavior).
+# CONFIG_DRM_TEGRA is not set
+CONFIG_SYSFB=y
+CONFIG_SYSFB_SIMPLEFB=y
 CONFIG_FB=y
+CONFIG_FB_SIMPLE=y
 CONFIG_FRAMEBUFFER_CONSOLE=y
 CONFIG_FRAMEBUFFER_CONSOLE_DETECT_PRIMARY=y
+CONFIG_BACKLIGHT_CLASS_DEVICE=y
+CONFIG_BACKLIGHT_PWM=y
 CONFIG_LOGO=y
 
 # ─── Wi-Fi (Marvell 88W8797 SDIO) ─────────────────────────────────
@@ -192,11 +194,12 @@ CONFIG_EXTRA_FIRMWARE=""
 CONFIG_EXTRA_FIRMWARE_DIR="/lib/firmware"
 
 # ═══════════════════════════════════════════════════════════════════
-# 3D GPU (optional — grate driver user-space stack)
+# 3D GPU (disabled — DRM_TEGRA breaks display)
 # ═══════════════════════════════════════════════════════════════════
-# CONFIG_DRM_TEGRA=y            # Already set in Display section
-# User-space: libdrm-opentegra + mesa (tegra gallium) + libvdpau-tegra
-# See: https://github.com/grate-driver
+# DRM_TEGRA reclaims display hardware from the EFI framebuffer and
+# fails to reinitialize the DSI panel → black screen.
+# Re-enable when DSI panel driver (panel-samsung-106hl02) is fixed.
+# CONFIG_DRM_TEGRA is not set
 
 # ═══════════════════════════════════════════════════════════════════
 # CAMERA (not yet supported — sensor model unknown)
