@@ -36,10 +36,32 @@ cd surface-rt2-linux
 # Build cross-compilation container (one-time)
 docker build -t surface2-build .
 
-# Compile kernel + DTB + initramfs
+# Full build: kernel + DTB + initramfs (~30 min, first time)
 mkdir -p output
 docker run --rm -v "$PWD/output:/work/output" surface2-build
 ```
+
+### Incremental builds
+
+After the first full build, use these to iterate faster:
+
+| Command | What it does | Time |
+|---------|-------------|------|
+| `./build.sh` | Full build (clone + compile + package) | ~30 min |
+| `./build.sh dtb` | Rebuild DTB only | seconds |
+| `./build.sh boot` | Rebuild DTB + reassemble boot files | seconds |
+| `./build.sh quick` | Everything except kernel compile | ~2 min |
+| `./build.sh kernel` | Recompile kernel + install modules | ~20 min |
+
+Via Docker: `docker run --rm -v "$PWD/output:/work/output" surface2-build dtb`
+
+**Typical DTS iteration loop:**
+1. Edit `dts/tegra114-surface2.dts`
+2. `./build.sh dtb` (or via Docker)
+3. Copy `output/boot/tegra114-surface2.dtb` to USB
+4. Reboot Surface 2
+
+> See [`docs/dts-testing-guide.md`](docs/dts-testing-guide.md) for DTB testing, hardware probing, and debugging tips.
 
 The Dockerfile copies the project files into the image and runs `scripts/build.sh` automatically.
 All kernel config options live in a single file: `configs/surface2_defconfig_fragment`.

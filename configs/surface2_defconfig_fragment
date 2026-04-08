@@ -7,6 +7,10 @@
 CONFIG_EFI=y
 CONFIG_EFI_STUB=y
 CONFIG_CMDLINE_FROM_BOOTLOADER=y
+# EFI stub loads DTB from dtb=\file.dtb on the kernel command line.
+# This is the primary DTB delivery method — allows swapping DTB files
+# on the FAT partition without rebuilding boot.efi.
+CONFIG_EFI_ARMSTUB_DTB_LOADER=y
 
 # ─── Device Tree ───────────────────────────────────────────────────
 CONFIG_OF=y

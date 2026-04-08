@@ -46,7 +46,9 @@ assemble_boot() {
     info "Assembling boot files ..."
     cd "$KERNEL_DIR"
 
-    # Copy kernel as EFI binary
+    # Copy kernel as EFI binary (plain zImage, no appended DTB).
+    # The DTB is loaded separately via the dtb= command-line parameter.
+    # Requires CONFIG_EFI_ARMSTUB_DTB_LOADER=y in the kernel config.
     cp arch/arm/boot/zImage "$BOOT_DIR/boot.efi"
     info "boot.efi created ($(du -h "$BOOT_DIR/boot.efi" | cut -f1))"
 
@@ -64,7 +66,7 @@ CMDLINE
     # Create post-install startup.nsh (boot from eMMC)
     cat > "$BOOT_DIR/startup-emmc.nsh" << 'STARTUP_EMMC'
 fs0:
-\boot.efi dtb=\tegra114-surface2.dtb root=/dev/mmcblk0p5 rootfstype=ext4 rootwait console=tty0 loglevel=4
+\boot.efi dtb=\tegra114-surface2.dtb root=/dev/mmcblk0p5 rootfstype=ext4 rootwait console=tty0 earlyprintk loglevel=7
 STARTUP_EMMC
 
     info "Boot files assembled in $BOOT_DIR"

@@ -47,24 +47,42 @@ dtc -I dts -O dtb -o /dev/null -W no-unit_address_vs_reg \
 
 ## 2. Deploying a New DTB
 
-The Surface 2 boots via EFI. The DTB is loaded from the USB/eMMC FAT partition.
+The Surface 2 boots via ARM EFI. The DTB is a **standalone file** on the FAT partition,
+referenced by the `dtb=\filename.dtb` parameter in `startup.nsh`. This requires
+`CONFIG_EFI_ARMSTUB_DTB_LOADER=y` in the kernel config.
+
+This approach lets you swap DTB files without rebuilding boot.efi — ideal for iterating
+on an unfinished device tree.
 
 ### USB boot (safest for testing)
 
-1. Mount the USB EFI partition
-2. Replace the DTB:
+1. Rebuild only the DTB (seconds):
    ```bash
-   cp tegra114-surface2.dtb /mnt/usb/surface2-custom.dtb
+   make tegra114-surface2.dtb
    ```
-3. `startup.nsh` already references `surface2-custom.dtb`
+2. Mount the USB FAT partition and copy the DTB:
+   ```bash
+   cp arch/arm/boot/dts/tegra114-surface2.dtb /mnt/usb/
+   ```
+3. `startup.nsh` already has `dtb=\tegra114-surface2.dtb` — no edit needed
 4. Reboot with Volume Up held to enter EFI shell
+
+### Testing a different DTB variant
+
+You can keep multiple DTBs on the USB and edit `startup.nsh` to pick one:
+
+```
+fs0:
+\boot.efi initrd=\initrd.gz dtb=\tegra114-surface2-v2.dtb root=/dev/ram0 ...
+```
 
 ### eMMC boot (after install)
 
 ```bash
 # On the running Surface 2:
 mount /dev/mmcblk0p1 /boot   # EFI system partition
-cp tegra114-surface2.dtb /boot/surface2-custom.dtb
+cp tegra114-surface2.dtb /boot/
+# Ensure startup.nsh references: dtb=\tegra114-surface2.dtb
 reboot
 ```
 
@@ -284,7 +302,7 @@ i2c@7000c400 {
 ## 7. Workflow Summary
 
 ```
- Edit DTS ──> make tegra114-surface2.dtb ──> Copy to USB/eMMC
+ Edit DTS ──> make dtb ──> Copy .dtb to USB ──> Reboot
      ^                                              │
      │                                              v
      └──── dmesg + i2cdetect + /proc/device-tree ───┘
@@ -292,10 +310,13 @@ i2c@7000c400 {
 
 1. **Edit** `dts/tegra114-surface2.dts` on your dev machine
 2. **Build** DTB only (fast: `make tegra114-surface2.dtb`)
-3. **Deploy** to USB FAT partition as `surface2-custom.dtb`
+3. **Copy** `.dtb` file to USB FAT partition
 4. **Boot** Surface 2, check `dmesg` for probe results
 5. **Probe** buses with `i2cdetect`, check `/proc/device-tree/`
 6. **Iterate** — fix addresses, GPIOs, regulators based on findings
+
+> boot.efi only needs to be rebuilt when the kernel itself changes.
+> DTB changes only require copying the new `.dtb` file.
 
 ### Key conflicts to resolve on hardware
 
