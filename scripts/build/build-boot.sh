@@ -52,17 +52,35 @@ assemble_boot() {
     cp arch/arm/boot/zImage "$BOOT_DIR/boot.efi"
     info "boot.efi created ($(du -h "$BOOT_DIR/boot.efi" | cut -f1))"
 
-    # Create startup.nsh
+    # Create startup.nsh — EFI Shell script executed on boot.
+    # NOTE: On Surface 2, the Yahallo EFI Shell does NOT pass these arguments
+    # to the kernel via load_options. The kernel actually reads cmdline.txt
+    # (see below). startup.nsh is still needed to launch the kernel image.
     cat > "$BOOT_DIR/startup.nsh" << 'STARTUP'
 fs0:
 \boot.efi initrd=\initrd.gz dtb=\tegra114-surface2.dtb root=/dev/ram0 init=/init console=tty0 earlyprintk loglevel=7
 STARTUP
+
+    # Create cmdline.txt — REQUIRED for Surface 2.
+    # The Yahallo EFI Shell does not pass command-line arguments via
+    # loaded_image->load_options to the kernel EFI stub. Without this file,
+    # dtb=, initrd=, root= are never seen → "Generating empty DTB".
+    # CONFIG_CMDLINE_FROM_FILE=y reads this file and REPLACES load_options.
+    # Must be plain ASCII, single line, no trailing newline issues.
+    cat > "$BOOT_DIR/cmdline.txt" << 'CMDLINE'
+dtb=\tegra114-surface2.dtb initrd=\initrd.gz root=/dev/ram0 init=/init console=tty0 earlyprintk loglevel=7
+CMDLINE
 
     # Create post-install startup.nsh (boot from eMMC)
     cat > "$BOOT_DIR/startup-emmc.nsh" << 'STARTUP_EMMC'
 fs0:
 \boot.efi dtb=\tegra114-surface2.dtb root=/dev/mmcblk0p5 rootfstype=ext4 rootwait console=tty0 earlyprintk loglevel=7
 STARTUP_EMMC
+
+    # Post-install cmdline.txt for eMMC boot
+    cat > "$BOOT_DIR/cmdline-emmc.txt" << 'CMDLINE_EMMC'
+dtb=\tegra114-surface2.dtb root=/dev/mmcblk0p5 rootfstype=ext4 rootwait console=tty0 earlyprintk loglevel=7
+CMDLINE_EMMC
 
     info "Boot files assembled in $BOOT_DIR"
 }

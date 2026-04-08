@@ -124,8 +124,10 @@ sudo ./scripts/prepare-usb.sh /dev/sdX path/to/rootfs.img
 S2LINUX (FAT32):
 ├── boot.efi              ← kernel (zImage as EFI binary)
 ├── initrd.gz             ← initramfs containing the installer
+├── cmdline.txt           ← kernel command line (REQUIRED — see note below)
 ├── startup.nsh           ← EFI Shell script: boots installer
 ├── startup-emmc.nsh      ← EFI Shell script: boots from eMMC (use after install)
+├── cmdline-emmc.txt      ← kernel command line for eMMC boot
 ├── *.dtb                 ← device tree blobs for Tegra 114
 ├── rootfs.img            ← root filesystem (Raspberry Pi OS)
 ├── EFI/BOOT/BOOTARM.EFI  ← EFI fallback boot path (copy of boot.efi)
@@ -133,6 +135,12 @@ S2LINUX (FAT32):
     ├── modules/          ← kernel modules
     └── firmware/mrvl/    ← Marvell Wi-Fi firmware
 ```
+
+> **Why `cmdline.txt`?** The Yahallo-jailbroken EFI Shell does not pass command-line
+> arguments to the loaded kernel via `loaded_image->load_options`. Without `cmdline.txt`,
+> the EFI stub never sees `dtb=`, `initrd=`, or `root=` and you get "Generating empty DTB".
+> The grate-linux `CONFIG_CMDLINE_FROM_FILE=y` feature reads this file and injects the
+> parameters. **After install**, replace `cmdline.txt` with `cmdline-emmc.txt` (rename it).
 
 ## Step 4 — Boot & install
 

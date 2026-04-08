@@ -21,6 +21,13 @@ CONFIG_EFI_ARMSTUB_DTB_LOADER=y
 # so dtb= is silently ignored and you get "Generating empty DTB".
 CONFIG_WINDOWS_RT=y
 CONFIG_WINDOWS_RT_SECUREBOOT_SKIP=y
+# CONFIG_CMDLINE_FROM_FILE: reads cmdline.txt from the FAT partition and
+# REPLACES image->load_options before any parsing.  This is REQUIRED because
+# the Yahallo EFI Shell does NOT pass command-line arguments via load_options
+# to the loaded EFI application — so dtb=, initrd=, and root= from
+# startup.nsh never reach the EFI stub.  cmdline.txt is the only working
+# delivery mechanism.  The file must exist on the FAT root next to boot.efi.
+CONFIG_CMDLINE_FROM_FILE=y
 
 # ─── Device Tree ───────────────────────────────────────────────────
 CONFIG_OF=y
