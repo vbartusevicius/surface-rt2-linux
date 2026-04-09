@@ -96,13 +96,13 @@ STARTUP
     #   eMMC (internal)    → /dev/mmcblk0  (Tegra SDHCI)
     #   USB flash drive    → /dev/sda      (USB mass storage — no SD slot on Surface 2)
     #
-    # USB boot: rootfs on USB partition 2 = /dev/sda2
-    # initrd= loads the minimal initramfs that insmod's usb-storage.ko
-    # (pre-built kernel has USB_STORAGE=m, not built-in)
+    # USB boot: Boot into RAM-based rescue system.
+    # root=/dev/ram0 — initramfs IS the root (no switch_root needed)
+    # The initramfs provides a shell + USB probing tools. Once USB appears,
+    # user can mount /dev/sda2 and pivot_root or chroot into real rootfs.
     # usbcore.autosuspend=-1 prevents Surface 2 from cutting USB VBUS power
-    # after kernel loads (known hardware issue — Ubuntu Wiki ARM/SurfaceRT)
     cat > "$BOOT_DIR/cmdline.txt" << CMDLINE
-dtb=${DTB_NAME} initrd=initrd.gz root=/dev/sda2 rootfstype=ext4 console=tty1 cpuidle.off=1 usbcore.autosuspend=-1 rootwait rw
+dtb=${DTB_NAME} initrd=initrd.gz root=/dev/ram0 init=/init console=tty1 cpuidle.off=1 usbcore.autosuspend=-1 rw
 CMDLINE
 
     # eMMC boot: rootfs on eMMC partition 5 = /dev/mmcblk0p5
