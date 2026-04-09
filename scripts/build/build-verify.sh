@@ -44,70 +44,6 @@ verify_output() {
         FAIL=1
     fi
 
-    # ── initrd.gz ──
-    if [ ! -f "$BOOT_DIR/initrd.gz" ]; then
-        warn "MISSING: initrd.gz"
-        FAIL=1
-    elif [ "$(stat -c%s "$BOOT_DIR/initrd.gz")" -lt 100000 ]; then
-        warn "SUSPECT: initrd.gz is smaller than 100 KB"
-        FAIL=1
-    else
-        # Decompress and inspect contents
-        local TMPDIR
-        TMPDIR=$(mktemp -d)
-        if gunzip -t "$BOOT_DIR/initrd.gz" 2>/dev/null; then
-            cd "$TMPDIR"
-            gunzip -c "$BOOT_DIR/initrd.gz" | cpio -id 2>/dev/null
-
-            # Check /init exists and is not corrupted (letter 'r' present)
-            if [ -f "$TMPDIR/init" ]; then
-                if grep -q 'reboot' "$TMPDIR/init" && grep -q 'resize2fs\|partition\|firmware' "$TMPDIR/init"; then
-                    info "OK  initrd.gz/init — installer script intact"
-                else
-                    warn "SUSPECT: initrd.gz/init may be corrupted (missing expected keywords)"
-                    FAIL=1
-                fi
-            else
-                warn "MISSING: initrd.gz does not contain /init"
-                FAIL=1
-            fi
-
-            # Check busybox is ARM
-            if [ -f "$TMPDIR/bin/busybox" ]; then
-                local BB_TYPE
-                BB_TYPE=$(file "$TMPDIR/bin/busybox")
-                if echo "$BB_TYPE" | grep -qi arm; then
-                    info "OK  initrd.gz/bin/busybox — ARM binary"
-                else
-                    warn "WRONG ARCH: initrd.gz/bin/busybox is NOT ARM: $BB_TYPE"
-                    FAIL=1
-                fi
-            else
-                warn "MISSING: initrd.gz/bin/busybox"
-                FAIL=1
-            fi
-
-            # Check e2fsck
-            if [ -f "$TMPDIR/sbin/e2fsck" ]; then
-                local E2_TYPE
-                E2_TYPE=$(file "$TMPDIR/sbin/e2fsck")
-                if echo "$E2_TYPE" | grep -qi arm; then
-                    info "OK  initrd.gz/sbin/e2fsck — ARM binary"
-                else
-                    warn "WRONG ARCH: initrd.gz/sbin/e2fsck is NOT ARM: $E2_TYPE"
-                    FAIL=1
-                fi
-            else
-                warn "MISSING: initrd.gz/sbin/e2fsck (installer will skip fsck)"
-            fi
-
-            rm -rf "$TMPDIR"
-        else
-            warn "CORRUPT: initrd.gz fails gzip integrity check"
-            FAIL=1
-        fi
-    fi
-
     # ── Kernel modules ──
     local MOD_DIR="$STAGING_DIR/lib/modules"
     if [ -d "$MOD_DIR" ]; then
@@ -144,14 +80,27 @@ verify_output() {
 
     # ── startup.nsh ──
     if [ -f "$BOOT_DIR/startup.nsh" ]; then
-        if grep -q 'boot.efi' "$BOOT_DIR/startup.nsh" && grep -q 'initrd' "$BOOT_DIR/startup.nsh"; then
+        if grep -q 'boot.efi' "$BOOT_DIR/startup.nsh"; then
             info "OK  startup.nsh — looks valid"
         else
-            warn "SUSPECT: startup.nsh may be corrupted"
+            warn "SUSPECT: startup.nsh does not reference boot.efi"
             FAIL=1
         fi
     else
         warn "MISSING: startup.nsh"
+        FAIL=1
+    fi
+
+    # ── cmdline.txt ──
+    if [ -f "$BOOT_DIR/cmdline.txt" ]; then
+        if grep -q 'dtb=' "$BOOT_DIR/cmdline.txt" && grep -q 'root=' "$BOOT_DIR/cmdline.txt"; then
+            info "OK  cmdline.txt — has dtb= and root="
+        else
+            warn "SUSPECT: cmdline.txt missing dtb= or root="
+            FAIL=1
+        fi
+    else
+        warn "MISSING: cmdline.txt"
         FAIL=1
     fi
 

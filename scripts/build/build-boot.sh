@@ -65,19 +65,17 @@ STARTUP
 
     # Create cmdline.txt — REQUIRED for Surface 2.
     # CONFIG_CMDLINE_FROM_FILE=y reads this and REPLACES load_options.
-    # Format must match the proven bootfiles+kernel.zip exactly:
-    # no backslashes, console=tty1, cpuidle.off=1.
+    #
+    # Surface 2 devices:
+    #   eMMC (internal)    → /dev/mmcblk0  (Tegra SDHCI)
+    #   USB flash drive    → /dev/sda      (USB mass storage — no SD slot on Surface 2)
+    #
+    # USB boot: rootfs on USB partition 2 = /dev/sda2
     cat > "$BOOT_DIR/cmdline.txt" << CMDLINE
-dtb=${DTB_NAME} initrd=initrd.gz root=/dev/ram0 init=/init console=tty1 cpuidle.off=1 rootwait rw
+dtb=${DTB_NAME} root=/dev/sda2 rootfstype=ext4 console=tty1 cpuidle.off=1 rootwait rw
 CMDLINE
 
-    # Create post-install startup.nsh (same — just launches boot.efi)
-    cat > "$BOOT_DIR/startup-emmc.nsh" << 'STARTUP_EMMC'
-fs0:
-boot.efi
-STARTUP_EMMC
-
-    # Post-install cmdline.txt for eMMC boot
+    # eMMC boot: rootfs on eMMC partition 5 = /dev/mmcblk0p5
     cat > "$BOOT_DIR/cmdline-emmc.txt" << CMDLINE_EMMC
 dtb=${DTB_NAME} root=/dev/mmcblk0p5 rootfstype=ext4 console=tty1 cpuidle.off=1 rootwait rw
 CMDLINE_EMMC
