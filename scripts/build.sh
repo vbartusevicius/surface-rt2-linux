@@ -42,6 +42,7 @@ error() { echo -e "\033[1;31m[ERROR]\033[0m $*"; exit 1; }
 source "$SCRIPTS_DIR/build-kernel.sh"
 source "$SCRIPTS_DIR/build-boot.sh"
 source "$SCRIPTS_DIR/build-prebuilt.sh"
+source "$SCRIPTS_DIR/build-initramfs.sh"
 source "$SCRIPTS_DIR/build-image.sh"
 source "$SCRIPTS_DIR/build-verify.sh"
 
@@ -53,6 +54,7 @@ cmd_prebuilt() {
     rm -rf "$BOOT_DIR" "$STAGING_DIR"
     mkdir -p "$BOOT_DIR" "$STAGING_DIR"
     download_prebuilt
+    build_initramfs
     assemble_boot
     copy_firmware
     verify_output || true
@@ -104,6 +106,7 @@ cmd_full() {
     install_modules
     copy_kernel_efi
     build_dtb
+    build_initramfs
     assemble_boot
     copy_firmware
     verify_output || true

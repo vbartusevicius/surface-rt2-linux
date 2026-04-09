@@ -123,6 +123,7 @@ build_image() {
     cp "$BOOT_DIR/cmdline.txt" "$IMAGE_BOOT_MNT/"
     cp "$BOOT_DIR/cmdline-emmc.txt" "$IMAGE_BOOT_MNT/" 2>/dev/null || true
     cp "$BOOT_DIR/startup.nsh" "$IMAGE_BOOT_MNT/" 2>/dev/null || true
+    cp "$BOOT_DIR/initrd.gz"   "$IMAGE_BOOT_MNT/" 2>/dev/null || true
 
     for dtb in "$BOOT_DIR"/*.dtb; do
         [ -f "$dtb" ] && cp "$dtb" "$IMAGE_BOOT_MNT/"
