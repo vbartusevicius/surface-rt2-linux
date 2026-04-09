@@ -193,15 +193,9 @@ build_image() {
     losetup -d "$IMAGE_LOOP"
     IMAGE_LOOP=""
 
-    # ── Compress ──
-    info "Compressing image with xz (this takes a few minutes)..."
-    xz -T0 -6 "$IMAGE_FILE"
-
     info ""
     info "=== Image ready ==="
-    info "  $IMAGE_XZ ($(du -h "$IMAGE_XZ" | cut -f1))"
     info ""
     info "Flash to USB:"
-    info "  xz -d $IMAGE_XZ"
     info "  sudo dd if=$IMAGE_FILE of=/dev/sdX bs=4M status=progress"
 }
