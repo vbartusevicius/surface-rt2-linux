@@ -26,6 +26,8 @@ RUN apt-get update && apt-get install -y \
     dosfstools \
     e2fsprogs \
     parted \
+    kpartx \
+    fdisk \
     file \
     dos2unix \
     && rm -rf /var/lib/apt/lists/*

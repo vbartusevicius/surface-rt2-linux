@@ -21,6 +21,7 @@ IMAGE_ROOT_MNT=""
 IMAGE_LOOP=""
 IMAGE_RLOOP=""
 IMAGE_RPI_MNT=""
+IMAGE_KPARTX=false
 
 image_cleanup() {
     set +e
@@ -29,6 +30,7 @@ image_cleanup() {
         [ -n "$m" ] && [ -d "$m" ] && rmdir "$m" 2>/dev/null
     done
     [ -n "$IMAGE_RLOOP" ] && losetup -d "$IMAGE_RLOOP" 2>/dev/null
+    $IMAGE_KPARTX && [ -n "$IMAGE_LOOP" ] && kpartx -d "$IMAGE_LOOP" 2>/dev/null
     [ -n "$IMAGE_LOOP" ] && losetup -d "$IMAGE_LOOP" 2>/dev/null
 }
 
@@ -84,24 +86,37 @@ build_image() {
     parted -s "$IMAGE_FILE" set 1 boot on
 
     # ── Attach loop device ──
-    IMAGE_LOOP=$(losetup --find --show --partscan "$IMAGE_FILE")
+    # Use losetup (no --partscan) + kpartx for reliable partition access in Docker.
+    # --partscan depends on udev/kernel creating /dev/loop0p1 which often fails
+    # in containers. kpartx creates /dev/mapper/loop0p1 via device-mapper.
+    IMAGE_LOOP=$(losetup --find --show "$IMAGE_FILE")
     info "Loop device: $IMAGE_LOOP"
+
+    info "Creating partition mappings with kpartx..."
+    kpartx -av "$IMAGE_LOOP"
+    IMAGE_KPARTX=true
     sleep 1
 
+    # kpartx creates /dev/mapper/loop<N>p<N> from /dev/loop<N>
+    local LOOP_BASE
+    LOOP_BASE=$(basename "$IMAGE_LOOP")
+    local PART1="/dev/mapper/${LOOP_BASE}p1"
+    local PART2="/dev/mapper/${LOOP_BASE}p2"
+
     # Verify partition devices exist
-    [ -b "${IMAGE_LOOP}p1" ] || error "Partition ${IMAGE_LOOP}p1 not found"
-    [ -b "${IMAGE_LOOP}p2" ] || error "Partition ${IMAGE_LOOP}p2 not found"
+    [ -b "$PART1" ] || error "Partition $PART1 not found. Ensure Docker is run with --privileged."
+    [ -b "$PART2" ] || error "Partition $PART2 not found. Ensure Docker is run with --privileged."
 
     # ── Format ──
     info "Formatting p1 as FAT32 (S2BOOT)..."
-    mkfs.vfat -F 32 -n "S2BOOT" "${IMAGE_LOOP}p1"
+    mkfs.vfat -F 32 -n "S2BOOT" "$PART1"
 
     info "Formatting p2 as ext4 (S2ROOT)..."
-    mkfs.ext4 -L "S2ROOT" -q "${IMAGE_LOOP}p2"
+    mkfs.ext4 -L "S2ROOT" -q "$PART2"
 
     # ── Populate p1 (boot) ──
     IMAGE_BOOT_MNT=$(mktemp -d)
-    mount "${IMAGE_LOOP}p1" "$IMAGE_BOOT_MNT"
+    mount "$PART1" "$IMAGE_BOOT_MNT"
 
     info "Copying boot files to p1..."
     cp "$BOOT_DIR/boot.efi"    "$IMAGE_BOOT_MNT/"
@@ -124,7 +139,7 @@ build_image() {
 
     # ── Populate p2 (rootfs) ──
     IMAGE_ROOT_MNT=$(mktemp -d)
-    mount "${IMAGE_LOOP}p2" "$IMAGE_ROOT_MNT"
+    mount "$PART2" "$IMAGE_ROOT_MNT"
 
     # Extract Raspberry Pi OS rootfs (partition 2 of the RPi image)
     info "Extracting Raspberry Pi OS rootfs..."
@@ -172,7 +187,9 @@ build_image() {
     IMAGE_ROOT_MNT=""
     info "Root partition ready"
 
-    # ── Detach loop ──
+    # ── Detach kpartx + loop ──
+    kpartx -d "$IMAGE_LOOP"
+    IMAGE_KPARTX=false
     losetup -d "$IMAGE_LOOP"
     IMAGE_LOOP=""
 
