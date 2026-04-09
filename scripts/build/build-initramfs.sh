@@ -11,8 +11,54 @@
 #   /bin/busybox           — static ARM binary (shell, insmod, mount, switch_root)
 #   /lib/modules/...       — usb-storage.ko + dependencies (scsi_mod, sd_mod)
 
-BUSYBOX_URL="https://busybox.net/downloads/binaries/1.35.0-arm-linux-musleabi/busybox"
 INITRD_NAME="initrd.gz"
+
+# ─── Download busybox static ARM binary ─────────────────────────────
+# Try multiple sources since individual mirrors go down.
+download_busybox_arm() {
+    local DEST="$1"
+
+    # Source 1: GitHub pre-built static binaries (v1.36.0, ARM EABI5)
+    local URL1="https://github.com/shutingrz/busybox-static-binaries-fat/raw/main/busybox-arm-linux-gnueabi"
+    # Source 2: busybox.net official (may be down)
+    local URL2="https://busybox.net/downloads/binaries/1.35.0-arm-linux-musleabi/busybox"
+
+    for url in "$URL1" "$URL2"; do
+        info "Trying: $url"
+        if wget -q --show-progress -O "$DEST" "$url" 2>/dev/null; then
+            chmod +x "$DEST"
+            local FTYPE
+            FTYPE=$(file "$DEST" 2>/dev/null || true)
+            if echo "$FTYPE" | grep -qi "ARM"; then
+                info "Downloaded busybox ARM static binary"
+                return 0
+            else
+                warn "Downloaded file is not ARM binary: $FTYPE"
+                rm -f "$DEST"
+            fi
+        fi
+    done
+
+    # Source 3: Extract from Debian armhf package
+    info "Trying Debian armhf package..."
+    local DEB_DIR
+    DEB_DIR=$(mktemp -d)
+    if wget -q -O "$DEB_DIR/bb.deb" \
+        "https://deb.debian.org/debian/pool/main/b/busybox/busybox-static_1.35.0-4+b3_armhf.deb" 2>/dev/null; then
+        if dpkg-deb -x "$DEB_DIR/bb.deb" "$DEB_DIR/extract" 2>/dev/null; then
+            if [ -f "$DEB_DIR/extract/bin/busybox" ]; then
+                cp "$DEB_DIR/extract/bin/busybox" "$DEST"
+                chmod +x "$DEST"
+                rm -rf "$DEB_DIR"
+                info "Extracted busybox from Debian armhf package"
+                return 0
+            fi
+        fi
+    fi
+    rm -rf "$DEB_DIR"
+
+    error "Failed to download busybox ARM static binary from all sources"
+}
 
 # ─── Build initramfs ────────────────────────────────────────────────
 build_initramfs() {
@@ -27,9 +73,9 @@ build_initramfs() {
     # ── Download busybox-static (ARM) ──
     local BUSYBOX_CACHE="/tmp/busybox-arm-static"
     if [ ! -f "$BUSYBOX_CACHE" ]; then
-        info "Downloading busybox static (ARM)..."
-        wget -q --show-progress -O "$BUSYBOX_CACHE" "$BUSYBOX_URL" || \
-            error "Failed to download busybox from $BUSYBOX_URL"
+        download_busybox_arm "$BUSYBOX_CACHE"
+    else
+        info "Using cached busybox"
     fi
     cp "$BUSYBOX_CACHE" "$INITRAMFS_DIR/bin/busybox"
     chmod +x "$INITRAMFS_DIR/bin/busybox"
