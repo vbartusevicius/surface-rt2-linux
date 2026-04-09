@@ -1,90 +1,85 @@
 # DTS Testing & Iteration Guide for Surface 2
 
-How to test, debug, and update the device tree (`tegra114-surface2.dts`) on a running Surface 2.
+How to test, debug, and iterate on the device tree (`tegra114-surface2.dts`) for the Surface 2.
+
+**Setup assumed:** Bookworm installed on eMMC via `install-to-emmc.sh`, USB kept as recovery medium.
 
 ---
 
 ## 1. Build Cycle
 
-### Full build (Docker)
+### Compile DTB only (fast — seconds)
 
 ```bash
-docker build -t surface2-build .
-docker run --rm -v "$PWD/output:/work/output" surface2-build
+docker run --rm -v "$PWD/output:/work/output" surface2-build dtb
 ```
 
-This clones grate-linux, applies the defconfig fragment, copies our DTS into the kernel tree, and compiles everything. Output lands in `output/boot/`.
+Output: `output/boot/tegra114-surface2.dtb`
 
-### DTS-only rebuild (fast iteration)
-
-If you already have the kernel source checked out, you can rebuild just the DTB without recompiling the entire kernel:
+### Full build from source (kernel + DTB + USB image)
 
 ```bash
-# Inside the kernel tree (or Docker container)
-export ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf-
-
-# Copy the DTS into the kernel tree
-cp dts/tegra114-surface2.dts arch/arm/boot/dts/
-
-# Compile only the DTB (seconds, not minutes)
-make tegra114-surface2.dtb
-
-# Result:
-ls -la arch/arm/boot/dts/tegra114-surface2.dtb
+docker run --rm --privileged -v "$PWD/output:/work/output" surface2-build full
 ```
 
 ### Syntax check without full compile
 
 ```bash
-# Preprocess + compile to check for errors without linking
+# Inside the kernel tree (Docker container)
 dtc -I dts -O dtb -o /dev/null -W no-unit_address_vs_reg \
     arch/arm/boot/dts/tegra114-surface2.dts
 ```
 
-> **Note:** Our DTS uses `#include` (C preprocessor), so standalone `dtc` won't work directly. Use the kernel `make` target or preprocess first with `cpp`.
+> **Note:** Our DTS uses `#include` (C preprocessor), so standalone `dtc` won't work directly. Use the Docker `dtb` command or preprocess first with `cpp`.
 
 ---
 
 ## 2. Deploying a New DTB
 
-The Surface 2 boots via ARM EFI. The DTB is a **standalone file** on the FAT partition,
-referenced by the `dtb=\filename.dtb` parameter in `startup.nsh`. This requires
-`CONFIG_EFI_ARMSTUB_DTB_LOADER=y` in the kernel config.
+The DTB is a **standalone file** on the ESP (FAT partition), referenced by `dtb=filename.dtb` in `cmdline.txt`. The kernel loads it via `CONFIG_EFI_ARMSTUB_DTB_LOADER=y`.
 
-This approach lets you swap DTB files without rebuilding boot.efi — ideal for iterating
-on an unfinished device tree.
+You can swap DTB files **without rebuilding boot.efi** — ideal for rapid iteration.
 
-### USB boot (safest for testing)
+### Deploy to eMMC (normal workflow)
 
-1. Rebuild only the DTB (seconds):
-   ```bash
-   make tegra114-surface2.dtb
-   ```
-2. Mount the USB FAT partition and copy the DTB:
-   ```bash
-   cp arch/arm/boot/dts/tegra114-surface2.dtb /mnt/usb/
-   ```
-3. `startup.nsh` already has `dtb=\tegra114-surface2.dtb` — no edit needed
-4. Reboot with Volume Up held to enter EFI shell
+```bash
+# On the Surface 2:
+mount /dev/mmcblk0p1 /mnt
+
+# ALWAYS backup first
+cp /mnt/*.dtb /mnt/backup/
+
+# Copy new DTB (transfer from PC via USB stick, scp, etc.)
+cp tegra114-surface2.dtb /mnt/
+umount /mnt
+reboot
+```
 
 ### Testing a different DTB variant
 
-You can keep multiple DTBs on the USB and edit `startup.nsh` to pick one:
-
-```
-fs0:
-\boot.efi initrd=\initrd.gz dtb=\tegra114-surface2-v2.dtb root=/dev/ram0 ...
-```
-
-### eMMC boot (after install)
+Keep multiple DTBs on the ESP and switch by editing `cmdline.txt`:
 
 ```bash
-# On the running Surface 2:
-mount /dev/mmcblk0p1 /boot   # EFI system partition
-cp tegra114-surface2.dtb /boot/
-# Ensure startup.nsh references: dtb=\tegra114-surface2.dtb
+mount /dev/mmcblk0p1 /mnt
+# Edit the dtb= parameter:
+#   dtb=tegra114-surface2-v2.dtb root=/dev/mmcblk0p5 ...
+nano /mnt/cmdline.txt
+umount /mnt
 reboot
 ```
+
+### Recovery (if display goes black)
+
+1. Insert the USB drive
+2. Boot from USB (hold Volume Up → select USB)
+3. Restore the known-good DTB:
+   ```bash
+   mount /dev/mmcblk0p1 /mnt
+   cp /mnt/backup/*.dtb /mnt/
+   cp /mnt/backup/cmdline.txt /mnt/   # if you changed it
+   umount /mnt
+   reboot   # remove USB first
+   ```
 
 ---
 
@@ -209,8 +204,8 @@ Common messages to look for:
 ### Enable verbose driver logging
 
 ```bash
-# At boot (add to startup.nsh kernel cmdline):
-# ... loglevel=7 dyndbg="module i2c_hid +p" ...
+# At boot — add to cmdline.txt on ESP:
+#   ... loglevel=7 dyndbg="module i2c_hid +p" ...
 
 # At runtime:
 echo "module i2c_hid +p" > /sys/kernel/debug/dynamic_debug/control
@@ -302,20 +297,22 @@ i2c@7000c400 {
 ## 7. Workflow Summary
 
 ```
- Edit DTS ──> make dtb ──> Copy .dtb to USB ──> Reboot
-     ^                                              │
-     │                                              v
-     └──── dmesg + i2cdetect + /proc/device-tree ───┘
+ Edit DTS ──> docker ... dtb ──> Copy .dtb to eMMC ESP ──> Reboot
+     ^                                                       │
+     │                                                       v
+     └──────── dmesg + i2cdetect + /proc/device-tree ────────┘
+                    (if black screen: boot USB, restore backup)
 ```
 
-1. **Edit** `dts/tegra114-surface2.dts` on your dev machine
-2. **Build** DTB only (fast: `make tegra114-surface2.dtb`)
-3. **Copy** `.dtb` file to USB FAT partition
-4. **Boot** Surface 2, check `dmesg` for probe results
-5. **Probe** buses with `i2cdetect`, check `/proc/device-tree/`
-6. **Iterate** — fix addresses, GPIOs, regulators based on findings
+1. **Edit** `dts/tegra114-surface2.dts` on your PC
+2. **Build** DTB: `docker run --rm -v "$PWD/output:/work/output" surface2-build dtb`
+3. **Transfer** `.dtb` to Surface 2 (USB stick, scp, etc.)
+4. **Backup + swap** on eMMC ESP: `mount /dev/mmcblk0p1 /mnt && cp /mnt/*.dtb /mnt/backup/ && cp new.dtb /mnt/`
+5. **Reboot**, check `dmesg` for probe results
+6. **Probe** buses with `i2cdetect`, inspect `/proc/device-tree/`
+7. **Iterate** — fix addresses, GPIOs, regulators based on findings
 
-> boot.efi only needs to be rebuilt when the kernel itself changes.
+> `boot.efi` only needs to be rebuilt when the **kernel** changes.
 > DTB changes only require copying the new `.dtb` file.
 
 ### Key conflicts to resolve on hardware
@@ -344,7 +341,7 @@ CONFIG_DYNAMIC_DEBUG=y       # Per-module debug logging
 CONFIG_REGULATOR_DEBUG=y     # Verbose regulator state logging (noisy!)
 ```
 
-To add temporarily at the kernel command line:
+To add temporarily to `cmdline.txt` on the ESP:
 ```
-loglevel=8 ignore_loglevel dyndbg="module i2c_tegra +p; module i2c_hid +p"
+dtb=... root=/dev/mmcblk0p5 ... loglevel=8 ignore_loglevel dyndbg="module i2c_tegra +p; module i2c_hid +p"
 ```

@@ -1,11 +1,12 @@
 #!/bin/bash
-# install-to-emmc.sh — Install running USB system to eMMC
+# install-to-emmc.sh — Install Bookworm rootfs + boot files to eMMC
 #
 # Run ON the Surface 2 after booting from USB:
 #   sudo /root/install-to-emmc.sh
 #
-# This copies the rootfs to eMMC p5 and boot files to eMMC p1 (ESP).
-# After install, the USB serves as a RECOVERY medium — keep it safe!
+# Copies rootfs to eMMC p5 and boot files to eMMC p1 (ESP).
+# Windows RT partition (p2 NTFS) is NEVER touched.
+# After install, run setup-dualboot.sh to configure boot selection.
 
 set -euo pipefail
 
@@ -22,18 +23,18 @@ error() { echo -e "\033[1;31m[ERROR]\033[0m $*"; exit 1; }
 echo "=== Surface 2 eMMC Installer ==="
 echo ""
 echo "This will:"
-echo "  1. Format $EMMC_ROOT as ext4"
+echo "  1. Format $EMMC_ROOT (p5) as ext4"
 echo "  2. Copy the running rootfs to it"
-echo "  3. Copy boot files to $EMMC_ESP"
+echo "  3. Copy boot files (kernel, DTB, cmdline) to $EMMC_ESP (p1)"
 echo ""
-echo "After install, KEEP THE USB — it's your recovery medium."
+echo "Windows RT (p2 NTFS) is NOT touched."
 echo ""
 read -r -p "Type YES to continue: " CONFIRM
 [ "$CONFIRM" = "YES" ] || error "Aborted"
 
 # ─── Find USB boot partition ────────────────────────────────────────
 USB_BOOT=""
-for candidate in /dev/mmcblk1p1 /dev/sda1; do
+for candidate in /dev/sda1 /dev/mmcblk1p1; do
     if [ -b "$candidate" ]; then
         TMP=$(mktemp -d)
         if mount -o ro "$candidate" "$TMP" 2>/dev/null; then
@@ -47,6 +48,8 @@ for candidate in /dev/mmcblk1p1 /dev/sda1; do
         rmdir "$TMP" 2>/dev/null
     fi
 done
+
+[ -n "$USB_BOOT" ] || warn "USB boot partition not found — will need manual boot file setup"
 
 # ─── Format and populate eMMC rootfs ────────────────────────────────
 info "Formatting $EMMC_ROOT as ext4..."
@@ -74,11 +77,10 @@ rmdir "$EMMC_MNT"
 info "Rootfs installed to $EMMC_ROOT"
 
 # ─── Copy boot files to ESP ─────────────────────────────────────────
-info "Setting up eMMC ESP ($EMMC_ESP)..."
+info "Copying boot files to eMMC ESP ($EMMC_ESP)..."
 ESP_MNT=$(mktemp -d)
 mount "$EMMC_ESP" "$ESP_MNT"
 
-# Create backup directory for DTS/kernel testing
 mkdir -p "$ESP_MNT/backup"
 
 if [ -n "$USB_BOOT" ] && [ -f "$USB_BOOT/boot.efi" ]; then
@@ -91,13 +93,11 @@ if [ -n "$USB_BOOT" ] && [ -f "$USB_BOOT/boot.efi" ]; then
         cp -v "$USB_BOOT/cmdline-emmc.txt" "$ESP_MNT/cmdline.txt"
     fi
 
-    mkdir -p "$ESP_MNT/EFI/BOOT"
-    cp "$USB_BOOT/boot.efi" "$ESP_MNT/EFI/BOOT/BOOTARM.EFI"
-
     # Save backup of known-good boot files
     cp "$ESP_MNT/boot.efi" "$ESP_MNT/backup/"
     cp "$ESP_MNT"/*.dtb "$ESP_MNT/backup/" 2>/dev/null || true
-    cp "$ESP_MNT/cmdline.txt" "$ESP_MNT/backup/"
+    cp "$ESP_MNT/cmdline.txt" "$ESP_MNT/backup/" 2>/dev/null || true
+    cp "$ESP_MNT/startup.nsh" "$ESP_MNT/backup/" 2>/dev/null || true
     info "Backup of boot files saved to ESP /backup/"
 
     umount "$USB_BOOT"
@@ -110,15 +110,11 @@ sync
 umount "$ESP_MNT"
 rmdir "$ESP_MNT"
 
-info ""
+echo ""
 info "=== Installation complete! ==="
-info ""
-info "Remove the USB and reboot → Surface 2 boots from eMMC."
-info ""
+echo ""
+info "Boot files and rootfs are on the eMMC."
+info "To set up dual-boot (Linux default, Vol Up for Windows):"
+info "  sudo /root/setup-dualboot.sh"
+echo ""
 info "KEEP THE USB as recovery medium."
-info "To test a custom DTB/kernel later:"
-info "  1. mount /dev/mmcblk0p1 /mnt"
-info "  2. cp /mnt/boot.efi /mnt/backup/   # backup first"
-info "  3. cp new-dtb.dtb /mnt/tegra114-microsoft-surface-2.dtb"
-info "  4. reboot"
-info "  If broken → insert USB, boot from USB, restore from /backup/"

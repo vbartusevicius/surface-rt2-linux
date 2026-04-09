@@ -79,7 +79,7 @@ All via Docker: `docker run --rm --privileged -v "$PWD/output:/work/output" surf
    sudo dd if=output/surface2-bookworm-usb.img of=/dev/sdX bs=4M status=progress
    ```
 2. Plug USB into Surface 2
-3. Power on holding **Volume Up** → UEFI boot menu → select USB
+3. Power on holding **Volume Down** → boots from USB
 4. Raspberry Pi OS boots — login: `pi` / `raspberry`
 
 ## Step 4 — Install to eMMC
@@ -90,9 +90,21 @@ From the running USB system:
 sudo /root/install-to-emmc.sh
 ```
 
-This formats eMMC p5, copies the rootfs, sets up boot files on the ESP, and creates a **backup** of boot files in `/backup/` on the ESP.
+This formats eMMC p5, copies rootfs and boot files. Windows RT (p2) is **not touched**.
 
-Remove USB and reboot → Surface 2 boots from eMMC.
+### Step 4b — Set up dual-boot (optional)
+
+```bash
+sudo /root/setup-dualboot.sh
+```
+
+Configures the EFI Shell as the default boot loader so Linux starts automatically:
+
+| Action | Boots |
+|--------|-------|
+| Power on normally | **Linux (Bookworm)** via EFI Shell → `startup.nsh` |
+| Hold **Volume Up** | UEFI Settings → select **Windows Boot Manager** |
+| Hold **Volume Down** | Boot from USB (recovery) |
 
 **Keep the USB** — it's your recovery medium.
 
@@ -144,7 +156,7 @@ reboot
    reboot    # remove USB first
    ```
 
-## Step 6 — Verify
+## Step 5 — Verify
 
 ```bash
 dmesg | grep -Ei 'mwifiex|sdhci|mxt|wm8962|tps6591|tegra|drm'

@@ -1,9 +1,8 @@
 output/
 linux/
-.initramfs/
 .git/
 resources/
-*.txt
+docs/
 *.md
 .vscode/
 .idea/
