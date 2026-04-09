@@ -129,8 +129,19 @@ build_image() {
         [ -f "$dtb" ] && cp "$dtb" "$IMAGE_BOOT_MNT/"
     done
 
+    # EFI/BOOT/BOOTARM.EFI — what UEFI firmware loads on boot.
+    # Prefer EfiFileChainloader (bypasses 7-min LoadImage delay on Surface 2).
+    # Falls back to boot.efi directly if chainloader unavailable.
     mkdir -p "$IMAGE_BOOT_MNT/EFI/BOOT"
-    cp "$BOOT_DIR/boot.efi" "$IMAGE_BOOT_MNT/EFI/BOOT/BOOTARM.EFI"
+    if [ -f "$BOOT_DIR/EfiFileChainloader.efi" ]; then
+        cp "$BOOT_DIR/EfiFileChainloader.efi" "$IMAGE_BOOT_MNT/EFI/BOOT/BOOTARM.EFI"
+        # Also keep a copy at root for install-to-emmc.sh / setup-dualboot.sh
+        cp "$BOOT_DIR/EfiFileChainloader.efi" "$IMAGE_BOOT_MNT/EfiFileChainloader.efi"
+        info "BOOTARM.EFI = EfiFileChainloader (fast boot)"
+    else
+        cp "$BOOT_DIR/boot.efi" "$IMAGE_BOOT_MNT/EFI/BOOT/BOOTARM.EFI"
+        warn "BOOTARM.EFI = boot.efi (expect ~7 min boot delay on Surface 2)"
+    fi
 
     sync
     umount "$IMAGE_BOOT_MNT"

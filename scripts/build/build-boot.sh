@@ -49,15 +49,41 @@ copy_kernel_efi() {
     info "boot.efi created ($(du -h "$BOOT_DIR/boot.efi" | cut -f1))"
 }
 
+# ─── Download EfiFileChainloader ─────────────────────────────────
+# Fixes Surface 2 BUG#1: BootServices->LoadImage causes 7-minute delay
+# for EFI binaries not compiled with edk2. The EfiFileChainloader
+# (compiled with edk2, 10KB) chainloads boot.efi directly, bypassing
+# LoadImage entirely. No more startup.nsh needed for boot.
+# Source: https://github.com/Open-Surface-RT/EfiApps
+CHAINLOADER_URL="https://github.com/Open-Surface-RT/EfiApps/releases/download/v1.0.0/EfiFileChainloader.efi"
+
+download_chainloader() {
+    local DEST="$BOOT_DIR/EfiFileChainloader.efi"
+    if [ -f "$DEST" ]; then
+        info "EfiFileChainloader already present"
+        return 0
+    fi
+    info "Downloading EfiFileChainloader (fixes 7-min boot delay)..."
+    wget -q --show-progress -O "$DEST" "$CHAINLOADER_URL" || {
+        warn "Failed to download EfiFileChainloader — falling back to EFI Shell boot"
+        warn "Boot will work but with ~7 minute delay on Surface 2"
+        rm -f "$DEST"
+        return 1
+    }
+    info "EfiFileChainloader ready ($(du -h "$DEST" | cut -f1))"
+}
+
 # ─── Assemble boot files ────────────────────────────────────────
 # Uses $DTB_NAME (set by build.sh — defaults to tegra114-surface2.dtb,
 # prebuilt mode uses tegra114-microsoft-surface-2.dtb).
 assemble_boot() {
     info "Assembling boot files (DTB=$DTB_NAME) ..."
 
-    # Create startup.nsh — EFI Shell script executed on boot.
-    # NOTE: Yahallo does NOT pass arguments to the kernel. startup.nsh just
-    # launches boot.efi. All real parameters come from cmdline.txt.
+    # Download EfiFileChainloader to bypass 7-min LoadImage delay
+    download_chainloader || true
+
+    # Create startup.nsh — fallback for EFI Shell boot (e.g. manual recovery).
+    # Normal boot uses EfiFileChainloader which loads boot.efi directly.
     cat > "$BOOT_DIR/startup.nsh" << 'STARTUP'
 fs0:
 boot.efi

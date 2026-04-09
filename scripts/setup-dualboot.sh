@@ -4,10 +4,14 @@
 # Run ON the Surface 2 (from eMMC or USB):
 #   sudo /root/setup-dualboot.sh
 #
-# This script places the EFI Shell and Linux boot files on the ESP.
-# Then boot into Windows RT and run setup-dualboot.cmd to add the
-# BCD menu entry — that gives you the interactive boot menu with
-# Vol+/Vol- to navigate and Windows button to select.
+# This script places the EfiFileChainloader (or EFI Shell as fallback)
+# and Linux boot files on the ESP. Then boot into Windows RT and run
+# setup-dualboot.cmd to add the BCD menu entry — that gives you the
+# interactive boot menu with Vol+/Vol- to navigate and Windows button
+# to select.
+#
+# EfiFileChainloader bypasses the Surface 2 UEFI BUG#1 where
+# BootServices->LoadImage causes a 7-minute delay for non-edk2 binaries.
 #
 # Prerequisites:
 #   - Yahallo jailbreak applied (Secure Boot disabled)
@@ -26,7 +30,7 @@ error() { echo -e "\033[1;31m[ERROR]\033[0m $*"; exit 1; }
 
 echo "=== Surface 2 Dual-Boot Setup (Step 1 of 2: Linux side) ==="
 echo ""
-echo "This will place the EFI Shell on the ESP so the BCD can launch it."
+echo "This will place the Linux chainloader on the ESP so the BCD can launch it."
 echo ""
 echo "After this, boot into Windows RT and run:"
 echo "  setup-dualboot.cmd   (from the ESP)"
@@ -67,85 +71,102 @@ cp -f "$ESP_MNT/cmdline.txt" "$ESP_MNT/backup/"
 cp -f "$ESP_MNT/startup.nsh" "$ESP_MNT/backup/"
 info "All boot files backed up to ESP /backup/"
 
-# ─── Place EFI Shell on ESP ─────────────────────────────────────────
-# The EFI Shell is what launches startup.nsh → boot.efi → Linux.
-# We place it at \EFI\Linux\shellarm.efi for the BCD entry.
-SHELL_EFI="EFI/Linux/shellarm.efi"
-SHELL_FOUND=false
+# ─── Place Linux chainloader on ESP ───────────────────────────────────
+# BCD entry points to \EFI\Linux\bootloader.efi.
+# Prefer EfiFileChainloader (10KB, compiled with edk2, no 7-min delay).
+# Fall back to EFI Shell (works but triggers Surface 2 LoadImage bug).
+LINUX_EFI="EFI/Linux/bootloader.efi"
+LOADER_FOUND=false
 mkdir -p "$ESP_MNT/EFI/Linux"
 
-# Check if current BOOTARM.EFI is an EFI Shell (different size from boot.efi)
-if [ -f "$ESP_MNT/EFI/BOOT/BOOTARM.EFI" ]; then
-    BOOTARM_SIZE=$(stat -c%s "$ESP_MNT/EFI/BOOT/BOOTARM.EFI" 2>/dev/null || echo 0)
-    BOOTEFI_SIZE=$(stat -c%s "$ESP_MNT/boot.efi" 2>/dev/null || echo 0)
-    if [ "$BOOTARM_SIZE" != "$BOOTEFI_SIZE" ]; then
-        cp "$ESP_MNT/EFI/BOOT/BOOTARM.EFI" "$ESP_MNT/$SHELL_EFI"
-        info "EFI Shell copied from existing BOOTARM.EFI"
-        SHELL_FOUND=true
-    fi
+# Source 1: EfiFileChainloader from ESP root (placed by build-image.sh)
+if [ -f "$ESP_MNT/EfiFileChainloader.efi" ]; then
+    cp "$ESP_MNT/EfiFileChainloader.efi" "$ESP_MNT/$LINUX_EFI"
+    info "EfiFileChainloader found on ESP (fast boot, no 7-min delay)"
+    LOADER_FOUND=true
 fi
 
-# Look for EFI Shell on USB if not found
-if ! $SHELL_FOUND; then
+# Source 2: EfiFileChainloader from USB boot partition
+if ! $LOADER_FOUND; then
     for candidate in /dev/sda1 /dev/mmcblk1p1; do
         [ -b "$candidate" ] || continue
         USB_MNT=$(mktemp -d)
         if mount -o ro "$candidate" "$USB_MNT" 2>/dev/null; then
-            # Check both uppercase (standard) and lowercase (Jailbreak USB zip) paths
-            local shell_src=""
-            for p in "$USB_MNT/EFI/BOOT/BOOTARM.EFI" "$USB_MNT/efi/boot/bootarm.efi"; do
-                [ -f "$p" ] && shell_src="$p" && break
-            done
-            if [ -n "$shell_src" ]; then
-                cp "$shell_src" "$ESP_MNT/$SHELL_EFI"
-                info "EFI Shell copied from USB ($candidate)"
-                SHELL_FOUND=true
+            if [ -f "$USB_MNT/EfiFileChainloader.efi" ]; then
+                cp "$USB_MNT/EfiFileChainloader.efi" "$ESP_MNT/$LINUX_EFI"
+                info "EfiFileChainloader copied from USB ($candidate)"
+                LOADER_FOUND=true
             fi
             umount "$USB_MNT"
         fi
         rmdir "$USB_MNT" 2>/dev/null
-        $SHELL_FOUND && break
+        $LOADER_FOUND && break
     done
 fi
 
-# Download from Tegra Jailbreak USB zip if still not found
-# Source: https://windows-rt-devices.gitbook.io/windows/tools/tegra-jailbreak-usb
-JAILBREAK_URL="https://1434104664-files.gitbook.io/~/files/v0/b/gitbook-x-prod.appspot.com/o/spaces%2Fg0WEvpZgMwlYVwyBqPep%2Fuploads%2FcFVuLJNCtdG2fiFlrfyO%2FTegra_Jailbreak_USB.zip?alt=media&token=1c9ef1a2-574e-4a79-ac56-3c751298d0ae"
-if ! $SHELL_FOUND; then
-    info "EFI Shell not found locally — downloading Tegra Jailbreak USB..."
-
-    # Ensure dependencies
-    for cmd in wget unzip; do
+# Source 3: Download EfiFileChainloader from GitHub
+CHAINLOADER_URL="https://github.com/Open-Surface-RT/EfiApps/releases/download/v1.0.0/EfiFileChainloader.efi"
+if ! $LOADER_FOUND; then
+    info "Trying to download EfiFileChainloader..."
+    for cmd in wget; do
         if ! command -v "$cmd" &>/dev/null; then
             info "Installing $cmd..."
-            apt-get update -qq && apt-get install -y -qq "$cmd" || error "Failed to install $cmd"
+            apt-get update -qq && apt-get install -y -qq "$cmd" || true
         fi
     done
-
-    DL_DIR=$(mktemp -d)
-    if wget -q --show-progress -O "$DL_DIR/jailbreak.zip" "$JAILBREAK_URL"; then
-        info "Downloaded Tegra Jailbreak USB zip"
-        # Zip contains: efi/boot/bootarm.efi (lowercase, 770KB EFI Shell)
-        if unzip -o -j "$DL_DIR/jailbreak.zip" "efi/boot/bootarm.efi" -d "$DL_DIR" 2>/dev/null; then
-            if [ -f "$DL_DIR/bootarm.efi" ]; then
-                cp "$DL_DIR/bootarm.efi" "$ESP_MNT/$SHELL_EFI"
-                info "EFI Shell extracted from Tegra Jailbreak USB zip"
-                SHELL_FOUND=true
-            fi
+    if command -v wget &>/dev/null; then
+        if wget -q --show-progress -O "$ESP_MNT/$LINUX_EFI" "$CHAINLOADER_URL" 2>/dev/null; then
+            info "Downloaded EfiFileChainloader (fast boot, no 7-min delay)"
+            LOADER_FOUND=true
         else
-            warn "Could not extract efi/boot/bootarm.efi from zip"
-            unzip -l "$DL_DIR/jailbreak.zip" | grep -i "efi\|boot" || true
+            rm -f "$ESP_MNT/$LINUX_EFI"
         fi
-    else
-        warn "Download failed — check network connectivity"
     fi
-    rm -rf "$DL_DIR"
 fi
 
-# Also keep it as fallback BOOTARM.EFI
-if $SHELL_FOUND; then
+# Source 4: Fall back to EFI Shell (has 7-min delay but works)
+if ! $LOADER_FOUND; then
+    warn "EfiFileChainloader not available — falling back to EFI Shell"
+    warn "Boot will work but with ~7 minute delay (Surface 2 LoadImage bug)"
+
+    # Check BOOTARM.EFI on ESP (if it's not the kernel, it's probably EFI Shell)
+    if [ -f "$ESP_MNT/EFI/BOOT/BOOTARM.EFI" ]; then
+        BOOTARM_SIZE=$(stat -c%s "$ESP_MNT/EFI/BOOT/BOOTARM.EFI" 2>/dev/null || echo 0)
+        BOOTEFI_SIZE=$(stat -c%s "$ESP_MNT/boot.efi" 2>/dev/null || echo 0)
+        if [ "$BOOTARM_SIZE" != "$BOOTEFI_SIZE" ]; then
+            cp "$ESP_MNT/EFI/BOOT/BOOTARM.EFI" "$ESP_MNT/$LINUX_EFI"
+            info "EFI Shell copied from existing BOOTARM.EFI"
+            LOADER_FOUND=true
+        fi
+    fi
+
+    # Check USB for EFI Shell
+    if ! $LOADER_FOUND; then
+        for candidate in /dev/sda1 /dev/mmcblk1p1; do
+            [ -b "$candidate" ] || continue
+            USB_MNT=$(mktemp -d)
+            if mount -o ro "$candidate" "$USB_MNT" 2>/dev/null; then
+                local shell_src=""
+                for p in "$USB_MNT/EFI/BOOT/BOOTARM.EFI" "$USB_MNT/efi/boot/bootarm.efi"; do
+                    [ -f "$p" ] && shell_src="$p" && break
+                done
+                if [ -n "$shell_src" ]; then
+                    cp "$shell_src" "$ESP_MNT/$LINUX_EFI"
+                    info "EFI Shell copied from USB ($candidate) — expect 7-min delay"
+                    LOADER_FOUND=true
+                fi
+                umount "$USB_MNT"
+            fi
+            rmdir "$USB_MNT" 2>/dev/null
+            $LOADER_FOUND && break
+        done
+    fi
+fi
+
+# Also set BOOTARM.EFI to the loader for direct UEFI fallback boot
+if $LOADER_FOUND; then
     mkdir -p "$ESP_MNT/EFI/BOOT"
-    cp "$ESP_MNT/$SHELL_EFI" "$ESP_MNT/EFI/BOOT/BOOTARM.EFI"
+    cp "$ESP_MNT/$LINUX_EFI" "$ESP_MNT/EFI/BOOT/BOOTARM.EFI"
 fi
 
 # ─── Generate Windows-side BCD setup script ─────────────────────────
@@ -172,8 +193,8 @@ if %errorlevel% neq 0 (
 REM ─── Find the ESP drive letter ──────────────────────────────────
 REM Mount ESP if not already accessible
 mountvol S: /s 2>nul
-if not exist "S:\EFI\Linux\shellarm.efi" (
-    echo ERROR: EFI Shell not found at S:\EFI\Linux\shellarm.efi
+if not exist "S:\EFI\Linux\bootloader.efi" (
+    echo ERROR: Linux bootloader not found at S:\EFI\Linux\bootloader.efi
     echo Run setup-dualboot.sh from Linux first.
     pause
     exit /b 1
@@ -190,8 +211,8 @@ if not defined GUID (
 
 echo GUID: {%GUID%}
 
-REM Set the path to the EFI Shell
-bcdedit /set {%GUID%} path \EFI\Linux\shellarm.efi
+REM Set the path to the Linux chainloader
+bcdedit /set {%GUID%} path \EFI\Linux\bootloader.efi
 bcdedit /set {%GUID%} device partition=S:
 
 REM Add to the firmware display order
@@ -219,14 +240,14 @@ sync
 umount "$ESP_MNT"
 rmdir "$ESP_MNT"
 
-if ! $SHELL_FOUND; then
-    error "EFI Shell binary not found! Copy it to ESP at $SHELL_EFI (from Yahallo USB)."
+if ! $LOADER_FOUND; then
+    error "No bootloader found! Ensure USB has EfiFileChainloader.efi or an EFI Shell."
 fi
 
 echo ""
 info "=== Step 1 complete! ==="
 echo ""
-info "EFI Shell placed at ESP:\\$SHELL_EFI"
+info "Linux bootloader placed at ESP:\\$LINUX_EFI"
 info "BCD setup script placed at ESP:\\setup-dualboot.cmd"
 echo ""
 info "Next: Boot into Windows RT, then:"
