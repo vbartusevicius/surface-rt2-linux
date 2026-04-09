@@ -94,19 +94,30 @@ This formats eMMC p5, copies rootfs and boot files. Windows RT (p2) is **not tou
 
 ### Step 4b — Set up dual-boot (optional)
 
+Two-step setup that gives you an interactive boot menu using the Surface hardware buttons:
+
+**Step 1 — From Linux:**
 ```bash
 sudo /root/setup-dualboot.sh
 ```
+Places the EFI Shell on the ESP and generates `setup-dualboot.cmd`.
 
-Configures the EFI Shell as the default boot loader so Linux starts automatically:
+**Step 2 — From Windows RT (Admin command prompt):**
+```cmd
+mountvol S: /s
+S:\setup-dualboot.cmd
+```
+Adds "Linux (Bookworm)" to the Windows Boot Manager BCD menu.
 
-| Action | Boots |
-|--------|-------|
-| Power on normally | **Linux (Bookworm)** via EFI Shell → `startup.nsh` |
-| Hold **Volume Up** | UEFI Settings → select **Windows Boot Manager** |
-| Hold **Volume Down** | Boot from USB (recovery) |
+**After setup — boot menu appears for 10 seconds:**
 
-**Keep the USB** — it's your recovery medium.
+| Button | Action |
+|--------|--------|
+| **Vol +/-** | Navigate between Linux / Windows |
+| **Windows button** | Select highlighted OS |
+| *(timeout)* | Boots default OS |
+
+**Keep the USB** — it's your recovery medium (hold Volume Down to boot from USB).
 
 ## DTS / Kernel Development
 
