@@ -19,11 +19,15 @@ docker build -t surface2-build .
 docker run --rm --privileged -v "$PWD/output:/work/output" surface2-build prebuilt
 
 # Flash to USB (Linux — adjust /dev/sdX)
-xz -dk output/surface2-bookworm-usb.img.xz
+# On Windows, use Rufus or balenaEtcher to flash the .img file
+# On macOS, use 
+#   diskutil list to find the USB device
+#   diskutil unmountDisk /dev/diskX
+#   sudo dd ... of=/dev/rdiskX 
+#   diskutil eject /dev/diskX
+
 sudo dd if=output/surface2-bookworm-usb.img of=/dev/sdX bs=4M status=progress
 ```
-
-On Windows, use [Rufus](https://rufus.ie/) or [balenaEtcher](https://www.balena.io/etcher/) to flash the `.img.xz`.
 
 ## Prerequisites
 
