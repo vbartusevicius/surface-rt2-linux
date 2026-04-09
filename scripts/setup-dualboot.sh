@@ -91,9 +91,14 @@ if ! $SHELL_FOUND; then
         [ -b "$candidate" ] || continue
         USB_MNT=$(mktemp -d)
         if mount -o ro "$candidate" "$USB_MNT" 2>/dev/null; then
-            if [ -f "$USB_MNT/EFI/BOOT/BOOTARM.EFI" ]; then
-                cp "$USB_MNT/EFI/BOOT/BOOTARM.EFI" "$ESP_MNT/$SHELL_EFI"
-                info "EFI Shell copied from USB"
+            # Check both uppercase (standard) and lowercase (Jailbreak USB zip) paths
+            local shell_src=""
+            for p in "$USB_MNT/EFI/BOOT/BOOTARM.EFI" "$USB_MNT/efi/boot/bootarm.efi"; do
+                [ -f "$p" ] && shell_src="$p" && break
+            done
+            if [ -n "$shell_src" ]; then
+                cp "$shell_src" "$ESP_MNT/$SHELL_EFI"
+                info "EFI Shell copied from USB ($candidate)"
                 SHELL_FOUND=true
             fi
             umount "$USB_MNT"
@@ -104,6 +109,7 @@ if ! $SHELL_FOUND; then
 fi
 
 # Download from Tegra Jailbreak USB zip if still not found
+# Source: https://windows-rt-devices.gitbook.io/windows/tools/tegra-jailbreak-usb
 JAILBREAK_URL="https://1434104664-files.gitbook.io/~/files/v0/b/gitbook-x-prod.appspot.com/o/spaces%2Fg0WEvpZgMwlYVwyBqPep%2Fuploads%2FcFVuLJNCtdG2fiFlrfyO%2FTegra_Jailbreak_USB.zip?alt=media&token=1c9ef1a2-574e-4a79-ac56-3c751298d0ae"
 if ! $SHELL_FOUND; then
     info "EFI Shell not found locally — downloading Tegra Jailbreak USB..."
@@ -119,17 +125,15 @@ if ! $SHELL_FOUND; then
     DL_DIR=$(mktemp -d)
     if wget -q --show-progress -O "$DL_DIR/jailbreak.zip" "$JAILBREAK_URL"; then
         info "Downloaded Tegra Jailbreak USB zip"
-        # Extract only the EFI Shell binary
-        if unzip -o -j "$DL_DIR/jailbreak.zip" "EFI/BOOT/BOOTARM.EFI" -d "$DL_DIR" 2>/dev/null || \
-           unzip -o -j "$DL_DIR/jailbreak.zip" "*/EFI/BOOT/BOOTARM.EFI" -d "$DL_DIR" 2>/dev/null || \
-           unzip -o -j "$DL_DIR/jailbreak.zip" "*/BOOTARM.EFI" -d "$DL_DIR" 2>/dev/null; then
-            if [ -f "$DL_DIR/BOOTARM.EFI" ]; then
-                cp "$DL_DIR/BOOTARM.EFI" "$ESP_MNT/$SHELL_EFI"
+        # Zip contains: efi/boot/bootarm.efi (lowercase, 770KB EFI Shell)
+        if unzip -o -j "$DL_DIR/jailbreak.zip" "efi/boot/bootarm.efi" -d "$DL_DIR" 2>/dev/null; then
+            if [ -f "$DL_DIR/bootarm.efi" ]; then
+                cp "$DL_DIR/bootarm.efi" "$ESP_MNT/$SHELL_EFI"
                 info "EFI Shell extracted from Tegra Jailbreak USB zip"
                 SHELL_FOUND=true
             fi
         else
-            warn "Could not find BOOTARM.EFI in the zip — listing contents:"
+            warn "Could not extract efi/boot/bootarm.efi from zip"
             unzip -l "$DL_DIR/jailbreak.zip" | grep -i "efi\|boot" || true
         fi
     else
