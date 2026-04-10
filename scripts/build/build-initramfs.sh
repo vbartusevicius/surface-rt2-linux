@@ -118,7 +118,9 @@ build_initramfs() {
     done
     info "Symlinks created"
 
-    # ── Collect ALL kernel modules (not just USB) ──
+    # ── Collect USB storage modules (keep initrd small for EFI stub) ──
+    # A large initrd may fail to load via EFI stub on ARM.
+    # Only include modules needed for USB mass storage.
     local KVER_DIR
     KVER_DIR=$(ls -d "$STAGING_DIR/lib/modules"/5.* 2>/dev/null | head -1)
     if [ -z "$KVER_DIR" ]; then
@@ -128,13 +130,28 @@ build_initramfs() {
     if [ -n "$KVER_DIR" ] && [ -d "$KVER_DIR" ]; then
         local KVER
         KVER=$(basename "$KVER_DIR")
-        info "Copying ALL kernel modules ($KVER)..."
-        cp -a "$KVER_DIR" "$INITRAMFS_DIR/lib/modules/"
-        local MOD_COUNT
-        MOD_COUNT=$(find "$INITRAMFS_DIR/lib/modules/$KVER" -name '*.ko' -o -name '*.ko.*' 2>/dev/null | wc -l)
-        info "Included $MOD_COUNT modules"
+        info "Kernel modules version: $KVER"
+        mkdir -p "$INITRAMFS_DIR/lib/modules/$KVER"
+
+        # Modules needed for USB mass storage (in load order):
+        #   scsi_mod.ko    — SCSI core
+        #   sd_mod.ko      — SCSI disk
+        #   usb-storage.ko — USB mass storage class
+        local MOD_COUNT=0
+        for mod_name in scsi_mod sd_mod usb-storage; do
+            local mod_file
+            mod_file=$(find "$KVER_DIR" -name "${mod_name}.ko" -o -name "${mod_name}.ko.xz" -o -name "${mod_name}.ko.gz" 2>/dev/null | head -1)
+            if [ -n "$mod_file" ] && [ -f "$mod_file" ]; then
+                cp "$mod_file" "$INITRAMFS_DIR/lib/modules/$KVER/"
+                MOD_COUNT=$((MOD_COUNT + 1))
+                info "  Included: $(basename "$mod_file")"
+            else
+                info "  Not found as module: ${mod_name} (may be built-in)"
+            fi
+        done
+        info "Collected $MOD_COUNT USB storage modules"
     else
-        warn "No modules directory found"
+        warn "No modules directory found — initramfs will try without insmod"
     fi
 
     # ── Create /etc files ──
@@ -183,10 +200,9 @@ echo "--- Loading USB storage modules ---"
 KVER=$(uname -r)
 for mod in scsi_mod sd_mod usb-storage; do
     for ext in .ko .ko.xz .ko.gz; do
-        MOD="/lib/modules/$KVER/kernel/*/${mod}${ext}"
-        FOUND=$(find /lib/modules/$KVER -name "${mod}${ext}" 2>/dev/null | head -1)
-        if [ -n "$FOUND" ]; then
-            insmod "$FOUND" 2>/dev/null && echo "  Loaded: $mod" || echo "  Already loaded or failed: $mod"
+        MOD="/lib/modules/$KVER/${mod}${ext}"
+        if [ -f "$MOD" ]; then
+            insmod "$MOD" 2>/dev/null && echo "  Loaded: $mod" || echo "  Already loaded or failed: $mod"
             break
         fi
     done
@@ -352,16 +368,20 @@ echo "Kernel: $(uname -r)"
 echo "cmdline: $(cat /proc/cmdline)"
 echo ""
 
-# Load ALL available modules (try USB-related first)
+# Load USB storage modules
 echo "Loading kernel modules..."
 KVER=$(uname -r)
+echo "  Kernel: $KVER"
+echo "  Modules dir: $(ls /lib/modules/ 2>/dev/null || echo 'MISSING')"
 
-# Priority modules for USB storage
 for mod in scsi_mod sd_mod usb-storage; do
-    FOUND=$(find /lib/modules/$KVER -name "${mod}.ko" -o -name "${mod}.ko.*" 2>/dev/null | head -1)
-    if [ -n "$FOUND" ]; then
-        insmod "$FOUND" 2>/dev/null && echo "  [OK] $mod" || echo "  [--] $mod (built-in or dep missing)"
-    fi
+    for ext in .ko .ko.xz .ko.gz; do
+        MOD="/lib/modules/$KVER/${mod}${ext}"
+        if [ -f "$MOD" ]; then
+            insmod "$MOD" 2>/dev/null && echo "  [OK] $mod" || echo "  [--] $mod (built-in or failed)"
+            break
+        fi
+    done
 done
 
 # Trigger device discovery

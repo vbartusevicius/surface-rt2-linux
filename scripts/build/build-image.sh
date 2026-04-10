@@ -1,23 +1,23 @@
 #!/bin/bash
-# build-image.sh — Create bootable USB disk image for Surface 2
+# build-image.sh — Create boot + rootfs images for Surface 2
 # Sourced by build.sh — do not run directly.
 #
-# Creates a 2-partition image:
-#   p1 (FAT32, 128 MB) — boot.efi, DTB, cmdline.txt, startup.nsh
-#   p2 (ext4,  rest)   — Raspberry Pi OS Bookworm + modules + firmware
+# Creates TWO separate dd-able images:
+#   surface2-boot-usb.img     — FAT32, ~130 MB → flash to USB stick
+#   surface2-rootfs-sdcard.img — ext4,  ~4 GB  → flash to micro-SD card
 #
 # Requires: losetup, parted, mkfs.vfat, mkfs.ext4, mount (run with --privileged)
 
-IMAGE_NAME="${IMAGE_NAME:-surface2-bookworm-usb}"
-IMAGE_SIZE_MB="${IMAGE_SIZE_MB:-4096}"
-BOOT_PART_MB=128
+USB_IMAGE_NAME="${USB_IMAGE_NAME:-surface2-boot-usb}"
+SD_IMAGE_NAME="${SD_IMAGE_NAME:-surface2-rootfs-sdcard}"
+BOOT_SIZE_MB=130
+ROOTFS_SIZE_MB="${ROOTFS_SIZE_MB:-4096}"
 
 # Raspberry Pi OS Lite (Bookworm) armhf
 RASPIOS_URL="${RASPIOS_URL:-https://downloads.raspberrypi.com/raspios_lite_armhf/images/raspios_lite_armhf-2024-11-19/2024-11-19-raspios-bookworm-armhf-lite.img.xz}"
 
 # ─── Cleanup on exit ───────────────────────────────────────────────
-IMAGE_BOOT_MNT=""
-IMAGE_ROOT_MNT=""
+IMAGE_MNT=""
 IMAGE_LOOP=""
 IMAGE_RLOOP=""
 IMAGE_RPI_MNT=""
@@ -25,7 +25,7 @@ IMAGE_KPARTX=false
 
 image_cleanup() {
     set +e
-    for m in "$IMAGE_RPI_MNT" "$IMAGE_ROOT_MNT" "$IMAGE_BOOT_MNT"; do
+    for m in "$IMAGE_RPI_MNT" "$IMAGE_MNT"; do
         [ -n "$m" ] && mountpoint -q "$m" 2>/dev/null && umount "$m" 2>/dev/null
         [ -n "$m" ] && [ -d "$m" ] && rmdir "$m" 2>/dev/null
     done
@@ -59,99 +59,104 @@ download_raspios() {
     info "Decompressed: $(du -h "$RASPIOS_IMG" | cut -f1)"
 }
 
-# ─── Build the disk image ─────────────────────────────────────────
+# ─── Helper: create a single-partition image ──────────────────────
+# Usage: create_partitioned_image <file> <size_mb> <fstype> <label>
+create_partitioned_image() {
+    local IMG_FILE="$1" SIZE_MB="$2" FSTYPE="$3" LABEL="$4"
+
+    rm -f "$IMG_FILE"
+    truncate -s "${SIZE_MB}M" "$IMG_FILE"
+
+    parted -s "$IMG_FILE" mklabel msdos
+    if [ "$FSTYPE" = "fat32" ]; then
+        parted -s "$IMG_FILE" mkpart primary fat32 1MiB 100%
+        parted -s "$IMG_FILE" set 1 boot on
+    else
+        parted -s "$IMG_FILE" mkpart primary ext2 1MiB 100%
+    fi
+
+    IMAGE_LOOP=$(losetup --find --show "$IMG_FILE")
+    kpartx -av "$IMAGE_LOOP"
+    IMAGE_KPARTX=true
+    sleep 1
+
+    local LOOP_BASE PART
+    LOOP_BASE=$(basename "$IMAGE_LOOP")
+    PART="/dev/mapper/${LOOP_BASE}p1"
+    [ -b "$PART" ] || error "$PART not found. Ensure Docker is run with --privileged."
+
+    if [ "$FSTYPE" = "fat32" ]; then
+        mkfs.vfat -F 32 -n "$LABEL" "$PART"
+    else
+        mkfs.ext4 -L "$LABEL" -q "$PART"
+    fi
+
+    IMAGE_MNT=$(mktemp -d)
+    mount "$PART" "$IMAGE_MNT"
+}
+
+# ─── Helper: finalize and detach image ────────────────────────────
+finalize_image() {
+    sync
+    umount "$IMAGE_MNT"
+    rmdir "$IMAGE_MNT"
+    IMAGE_MNT=""
+    kpartx -d "$IMAGE_LOOP"
+    IMAGE_KPARTX=false
+    losetup -d "$IMAGE_LOOP"
+    IMAGE_LOOP=""
+}
+
+# ─── Build both images ────────────────────────────────────────────
 build_image() {
-    local IMAGE_FILE="$OUTPUT_DIR/$IMAGE_NAME.img"
-    local IMAGE_XZ="$IMAGE_FILE.xz"
+    local USB_FILE="$OUTPUT_DIR/$USB_IMAGE_NAME.img"
+    local SD_FILE="$OUTPUT_DIR/$SD_IMAGE_NAME.img"
 
-    info "=== Creating bootable USB image ==="
-    info "Size: ${IMAGE_SIZE_MB}MB, Boot: ${BOOT_PART_MB}MB"
+    info "=== Creating Surface 2 images ==="
+    info "USB boot:   ${BOOT_SIZE_MB}MB → $USB_IMAGE_NAME.img"
+    info "SD rootfs:  ${ROOTFS_SIZE_MB}MB → $SD_IMAGE_NAME.img"
 
-    # Register cleanup
     trap 'image_cleanup; exit 1' INT TERM
     trap 'image_cleanup' EXIT
 
     # ── Download Raspberry Pi OS ──
     download_raspios
 
-    # ── Create partitioned image ──
-    info "Creating ${IMAGE_SIZE_MB}MB disk image..."
-    rm -f "$IMAGE_FILE" "$IMAGE_XZ"
-    truncate -s "${IMAGE_SIZE_MB}M" "$IMAGE_FILE"
+    # ══════════════════════════════════════════════════════════════
+    # Image 1: USB boot stick (FAT32)
+    # ══════════════════════════════════════════════════════════════
+    info ""
+    info "--- USB boot image (${BOOT_SIZE_MB}MB) ---"
 
-    info "Partitioning (MBR: p1=FAT32 ${BOOT_PART_MB}MB, p2=ext4 rest)..."
-    parted -s "$IMAGE_FILE" mklabel msdos
-    parted -s "$IMAGE_FILE" mkpart primary fat32 1MiB "${BOOT_PART_MB}MiB"
-    parted -s "$IMAGE_FILE" mkpart primary ext2  "${BOOT_PART_MB}MiB" 100%
-    parted -s "$IMAGE_FILE" set 1 boot on
+    create_partitioned_image "$USB_FILE" "$BOOT_SIZE_MB" "fat32" "S2BOOT"
 
-    # ── Attach loop device ──
-    # Use losetup (no --partscan) + kpartx for reliable partition access in Docker.
-    # --partscan depends on udev/kernel creating /dev/loop0p1 which often fails
-    # in containers. kpartx creates /dev/mapper/loop0p1 via device-mapper.
-    IMAGE_LOOP=$(losetup --find --show "$IMAGE_FILE")
-    info "Loop device: $IMAGE_LOOP"
-
-    info "Creating partition mappings with kpartx..."
-    kpartx -av "$IMAGE_LOOP"
-    IMAGE_KPARTX=true
-    sleep 1
-
-    # kpartx creates /dev/mapper/loop<N>p<N> from /dev/loop<N>
-    local LOOP_BASE
-    LOOP_BASE=$(basename "$IMAGE_LOOP")
-    local PART1="/dev/mapper/${LOOP_BASE}p1"
-    local PART2="/dev/mapper/${LOOP_BASE}p2"
-
-    # Verify partition devices exist
-    [ -b "$PART1" ] || error "Partition $PART1 not found. Ensure Docker is run with --privileged."
-    [ -b "$PART2" ] || error "Partition $PART2 not found. Ensure Docker is run with --privileged."
-
-    # ── Format ──
-    info "Formatting p1 as FAT32 (S2BOOT)..."
-    mkfs.vfat -F 32 -n "S2BOOT" "$PART1"
-
-    info "Formatting p2 as ext4 (S2ROOT)..."
-    mkfs.ext4 -L "S2ROOT" -q "$PART2"
-
-    # ── Populate p1 (boot) ──
-    IMAGE_BOOT_MNT=$(mktemp -d)
-    mount "$PART1" "$IMAGE_BOOT_MNT"
-
-    info "Copying boot files to p1..."
-    cp "$BOOT_DIR/boot.efi"    "$IMAGE_BOOT_MNT/"
-    cp "$BOOT_DIR/cmdline.txt" "$IMAGE_BOOT_MNT/"
-    cp "$BOOT_DIR/cmdline-emmc.txt" "$IMAGE_BOOT_MNT/" 2>/dev/null || true
-    cp "$BOOT_DIR/startup.nsh" "$IMAGE_BOOT_MNT/" 2>/dev/null || true
-    cp "$BOOT_DIR/initrd.gz"   "$IMAGE_BOOT_MNT/" 2>/dev/null || true
+    info "Copying boot files..."
+    cp "$BOOT_DIR/boot.efi"    "$IMAGE_MNT/"
+    cp "$BOOT_DIR/cmdline.txt" "$IMAGE_MNT/"
+    cp "$BOOT_DIR/cmdline-emmc.txt" "$IMAGE_MNT/" 2>/dev/null || true
+    cp "$BOOT_DIR/startup.nsh" "$IMAGE_MNT/" 2>/dev/null || true
 
     for dtb in "$BOOT_DIR"/*.dtb; do
-        [ -f "$dtb" ] && cp "$dtb" "$IMAGE_BOOT_MNT/"
+        [ -f "$dtb" ] && cp "$dtb" "$IMAGE_MNT/"
     done
 
-    # EFI/BOOT/BOOTARM.EFI — what UEFI firmware loads on ARM boot.
-    # This is boot.efi (the kernel's EFI stub). UEFI loads it directly.
-    # NOTE: Surface 2 has a ~7 min delay in BootServices->LoadImage for
-    # non-edk2 binaries. EfiFileChainloader was tried but doesn't work
-    # (loads file into memory but fails to execute it). Accept the delay.
-    mkdir -p "$IMAGE_BOOT_MNT/EFI/BOOT"
-    cp "$BOOT_DIR/boot.efi" "$IMAGE_BOOT_MNT/EFI/BOOT/BOOTARM.EFI"
-    info "BOOTARM.EFI = boot.efi (kernel)"
+    # EFI/BOOT/BOOTARM.EFI — what UEFI firmware loads on ARM boot
+    mkdir -p "$IMAGE_MNT/EFI/BOOT"
+    cp "$BOOT_DIR/boot.efi" "$IMAGE_MNT/EFI/BOOT/BOOTARM.EFI"
 
-    # Keep chainloader on partition for future experiments if available
-    if [ -f "$BOOT_DIR/EfiFileChainloader.efi" ]; then
-        cp "$BOOT_DIR/EfiFileChainloader.efi" "$IMAGE_BOOT_MNT/EfiFileChainloader.efi"
-    fi
+    info "Boot partition contents:"
+    ls -lh "$IMAGE_MNT/"
 
-    sync
-    umount "$IMAGE_BOOT_MNT"
-    rmdir "$IMAGE_BOOT_MNT"
-    IMAGE_BOOT_MNT=""
-    info "Boot partition ready"
+    finalize_image
+    info "USB image: $(du -h "$USB_FILE" | cut -f1) → $USB_FILE"
 
-    # ── Populate p2 (rootfs) ──
-    IMAGE_ROOT_MNT=$(mktemp -d)
-    mount "$PART2" "$IMAGE_ROOT_MNT"
+    # ══════════════════════════════════════════════════════════════
+    # Image 2: SD card rootfs (ext4)
+    # ══════════════════════════════════════════════════════════════
+    info ""
+    info "--- SD card rootfs image (${ROOTFS_SIZE_MB}MB) ---"
+
+    create_partitioned_image "$SD_FILE" "$ROOTFS_SIZE_MB" "ext4" "S2ROOT"
 
     # Extract Raspberry Pi OS rootfs (partition 2 of the RPi image)
     info "Extracting Raspberry Pi OS rootfs..."
@@ -165,7 +170,7 @@ build_image() {
     mount -o ro "$IMAGE_RLOOP" "$IMAGE_RPI_MNT"
 
     info "Copying rootfs (this takes a few minutes)..."
-    cp -a "$IMAGE_RPI_MNT"/. "$IMAGE_ROOT_MNT"/
+    cp -a "$IMAGE_RPI_MNT"/. "$IMAGE_MNT"/
 
     umount "$IMAGE_RPI_MNT"
     losetup -d "$IMAGE_RLOOP"
@@ -175,39 +180,36 @@ build_image() {
     # Install kernel modules
     if [ -d "$STAGING_DIR/lib/modules" ]; then
         info "Installing kernel modules..."
-        mkdir -p "$IMAGE_ROOT_MNT/lib/modules"
-        cp -a "$STAGING_DIR/lib/modules"/* "$IMAGE_ROOT_MNT/lib/modules/"
+        mkdir -p "$IMAGE_MNT/lib/modules"
+        cp -a "$STAGING_DIR/lib/modules"/* "$IMAGE_MNT/lib/modules/"
     fi
 
     # Install Wi-Fi firmware
     if [ -d "$STAGING_DIR/lib/firmware" ]; then
         info "Installing Wi-Fi firmware..."
-        mkdir -p "$IMAGE_ROOT_MNT/lib/firmware"
-        cp -a "$STAGING_DIR/lib/firmware"/* "$IMAGE_ROOT_MNT/lib/firmware/" 2>/dev/null || true
+        mkdir -p "$IMAGE_MNT/lib/firmware"
+        cp -a "$STAGING_DIR/lib/firmware"/* "$IMAGE_MNT/lib/firmware/" 2>/dev/null || true
     fi
 
     # Copy install-to-emmc.sh
     if [ -f "$WORK/scripts/install-to-emmc.sh" ]; then
-        cp "$WORK/scripts/install-to-emmc.sh" "$IMAGE_ROOT_MNT/root/"
-        chmod +x "$IMAGE_ROOT_MNT/root/install-to-emmc.sh"
+        cp "$WORK/scripts/install-to-emmc.sh" "$IMAGE_MNT/root/"
+        chmod +x "$IMAGE_MNT/root/install-to-emmc.sh"
         info "install-to-emmc.sh → /root/"
     fi
 
-    sync
-    umount "$IMAGE_ROOT_MNT"
-    rmdir "$IMAGE_ROOT_MNT"
-    IMAGE_ROOT_MNT=""
-    info "Root partition ready"
+    finalize_image
+    info "SD image: $(du -h "$SD_FILE" | cut -f1) → $SD_FILE"
 
-    # ── Detach kpartx + loop ──
-    kpartx -d "$IMAGE_LOOP"
-    IMAGE_KPARTX=false
-    losetup -d "$IMAGE_LOOP"
-    IMAGE_LOOP=""
-
+    # ══════════════════════════════════════════════════════════════
     info ""
-    info "=== Image ready ==="
+    info "=== Both images ready ==="
     info ""
-    info "Flash to USB:"
-    info "  sudo dd if=$IMAGE_FILE of=/dev/sdX bs=4M status=progress"
+    info "1. Flash USB stick (boot):"
+    info "   sudo dd if=$USB_FILE of=/dev/sdX bs=4M status=progress"
+    info ""
+    info "2. Flash micro-SD card (rootfs):"
+    info "   sudo dd if=$SD_FILE of=/dev/sdY bs=4M status=progress"
+    info ""
+    info "3. Insert both into Surface 2 and boot (Volume Down)"
 }

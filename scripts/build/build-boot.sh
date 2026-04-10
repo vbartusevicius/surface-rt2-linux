@@ -94,15 +94,17 @@ STARTUP
     #
     # Surface 2 devices:
     #   eMMC (internal)    → /dev/mmcblk0  (Tegra SDHCI)
-    #   USB flash drive    → /dev/sda      (USB mass storage — no SD slot on Surface 2)
+    #   micro-SD card      → /dev/mmcblk1  (Tegra SDHCI, built-in driver)
+    #   USB flash drive    → /dev/sda      (USB mass storage — loses power after boot)
     #
-    # USB boot: Boot into RAM-based rescue system.
-    # root=/dev/ram0 — initramfs IS the root (no switch_root needed)
-    # The initramfs provides a shell + USB probing tools. Once USB appears,
-    # user can mount /dev/sda2 and pivot_root or chroot into real rootfs.
-    # usbcore.autosuspend=-1 prevents Surface 2 from cutting USB VBUS power
+    # USB+SD boot: kernel on USB FAT32, rootfs on micro-SD card.
+    # Surface 2 loses USB power after kernel loads (Ubuntu Wiki confirmed).
+    # Workaround: rootfs on SD card (/dev/mmcblk1) which uses built-in
+    # MMC/SDHCI drivers — no initramfs or USB modules needed.
+    # SD card layout: single ext4 partition (p1=rootfs)
+    # No initrd= needed — all required drivers are built-in.
     cat > "$BOOT_DIR/cmdline.txt" << CMDLINE
-dtb=${DTB_NAME} initrd=initrd.gz root=/dev/ram0 init=/init console=tty1 cpuidle.off=1 usbcore.autosuspend=-1 rw
+dtb=${DTB_NAME} root=/dev/mmcblk1p1 rootfstype=ext4 console=tty1 cpuidle.off=1 rootwait rw
 CMDLINE
 
     # eMMC boot: rootfs on eMMC partition 5 = /dev/mmcblk0p5

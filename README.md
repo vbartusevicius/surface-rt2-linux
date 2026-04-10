@@ -15,25 +15,26 @@ cd surface-rt2-linux
 # Build Docker image (one-time)
 docker build -t surface2-build .
 
-# Create bootable USB image (~10 min: downloads kernel + Raspberry Pi OS)
+# Create image (~10 min: downloads kernel + Raspberry Pi OS)
 docker run --rm --privileged -v "$PWD/output:/work/output" surface2-build prebuilt
 
-# Flash to USB (Linux — adjust /dev/sdX)
-# On Windows, use Rufus or balenaEtcher to flash the .img file
-# On macOS, use 
-#   diskutil list to find the USB device
-#   diskutil unmountDisk /dev/diskX
-#   sudo dd ... of=/dev/rdiskX 
-#   diskutil eject /dev/diskX
+# Flash to USB stick (boot)
+sudo dd if=output/surface2-boot-usb.img of=/dev/sdX bs=4M status=progress
 
-sudo dd if=output/surface2-bookworm-usb.img of=/dev/sdX bs=4M status=progress
+# Flash to micro-SD card (rootfs)
+sudo dd if=output/surface2-rootfs-sdcard.img of=/dev/sdY bs=4M status=progress
+
+# Insert both into Surface 2 → Power on with Volume Down → wait ~7 min → Linux!
 ```
 
 ## Prerequisites
 
 - **Jailbroken Surface 2** — Secure Boot disabled (GoldenKeys + Yahallo)
 - **Host PC** — Windows, macOS, or Linux with [Docker](https://www.docker.com/)
-- **USB drive** ≥ 8 GB
+- **USB stick** ≥ 256 MB — boot files only (kernel, DTB, cmdline)
+- **micro-SD card** ≥ 4 GB — root filesystem (Raspberry Pi OS)
+
+> **Why two devices?** Surface 2 cuts USB power after the kernel loads ([Ubuntu Wiki](https://wiki.ubuntu.com/ARM/SurfaceRT#Surface_2)). The USB stick boots the kernel, then the SD card takes over as root. The SD card uses built-in MMC/SDHCI drivers — no initramfs needed.
 
 ## Step 1 — Partition the eMMC
 
@@ -47,19 +48,18 @@ Target eMMC layout:
 | p2 | ~16 GB | NTFS | Windows RT (shrunk) |
 | p5 | ~6 GB | ext4 | Linux root `/` |
 
-## Step 2 — Build the USB image
+## Step 2 — Build the image
 
 ```bash
 docker run --rm --privileged -v "$PWD/output:/work/output" surface2-build prebuilt
 ```
 
-This downloads the [proven pre-built kernel](https://files.open-rt.party/Linux/Other/surface-2-bootfiles%2Bkernel.zip) (5.17.0-rc4) + Raspberry Pi OS Bookworm Lite, and creates a **2-partition USB image**:
+This downloads the [proven pre-built kernel](https://files.open-rt.party/Linux/Other/surface-2-bootfiles%2Bkernel.zip) (5.17.0-rc4) + Raspberry Pi OS Bookworm Lite, and creates **two images**:
 
-```
-output/surface2-bookworm-usb.img.xz
-  p1 (FAT32, 128 MB) — boot.efi, DTB, cmdline.txt, startup.nsh
-  p2 (ext4,  ~4 GB)  — Raspberry Pi OS + kernel modules + Wi-Fi firmware
-```
+| Image | Size | Contents | Flash to |
+|-------|------|----------|----------|
+| `surface2-boot-usb.img` | ~130 MB | boot.efi, DTB, cmdline.txt | **USB stick** |
+| `surface2-rootfs-sdcard.img` | ~4 GB | Raspberry Pi OS + modules + firmware | **micro-SD card** |
 
 ### Build commands
 
@@ -75,16 +75,33 @@ All via Docker: `docker run --rm --privileged -v "$PWD/output:/work/output" surf
 
 (`dtb` and `kernel` don't need `--privileged`)
 
-## Step 3 — Flash USB and boot
+## Step 3 — Flash USB stick and SD card
 
-1. Flash the image to USB:
-   ```bash
-   xz -dk output/surface2-bookworm-usb.img.xz
-   sudo dd if=output/surface2-bookworm-usb.img of=/dev/sdX bs=4M status=progress
-   ```
-2. Plug USB into Surface 2
+Both images are flashed the same way — `dd` (Linux/macOS) or [balenaEtcher](https://etcher.balena.io/) / [Rufus](https://rufus.ie/) (Windows).
+
+```bash
+# USB stick (boot)
+sudo dd if=output/surface2-boot-usb.img of=/dev/sdX bs=4M status=progress
+
+# micro-SD card (rootfs)
+sudo dd if=output/surface2-rootfs-sdcard.img of=/dev/sdY bs=4M status=progress
+```
+
+### Boot
+
+1. Insert **USB stick** into the Surface 2 USB port
+2. Insert **micro-SD card** into the Surface 2 SD card slot
 3. Power on holding **Volume Down** → boots from USB
-4. Raspberry Pi OS boots — login: `pi` / `raspberry`
+4. Wait ~7 minutes (Surface 2 UEFI bug — one-time delay each boot)
+5. Kernel loads from USB, mounts rootfs from SD card
+6. Raspberry Pi OS boots — login: `pi` / `raspberry`
+
+```
+Boot flow:
+  UEFI → USB:/EFI/BOOT/BOOTARM.EFI (kernel)
+       → USB:/cmdline.txt (root=/dev/mmcblk1p1)
+       → SD card /dev/mmcblk1p1 (ext4 rootfs)
+```
 
 ## Step 4 — Install to eMMC
 
@@ -185,17 +202,19 @@ cat /sys/class/power_supply/*/uevent
 | Problem | Fix |
 |---------|-----|
 | "Generating empty DTB" | Kernel ignores `dtb=` due to Secure Boot check. Pre-built kernel has this fixed. For custom: `CONFIG_WINDOWS_RT=y` + `CONFIG_WINDOWS_RT_SECUREBOOT_SKIP=y` |
-| Black screen | **Never** put `initrd=` in cmdline.txt with the pre-built kernel. For custom kernels: disable `CONFIG_DRM_TEGRA`, use `CONFIG_FB_SIMPLE=y` + `CONFIG_SYSFB_SIMPLEFB=y` |
-| "waiting for root device" | Check `cmdline.txt` root= device. USB flash drive → `/dev/sda2`. Surface 2 has no SD slot — eMMC is `mmcblk0`, USB is `sda` |
+| Black screen | Disable `CONFIG_DRM_TEGRA`, use `CONFIG_FB_SIMPLE=y` + `CONFIG_SYSFB_SIMPLEFB=y`. Happens randomly on ~1/3 of boots — power cycle and try again. |
+| "waiting for root device" | Check `cmdline.txt` root= device. SD card → `/dev/mmcblk1p1`, eMMC → `/dev/mmcblk0p5`. Ensure SD card is inserted and formatted as ext4. |
 | No Wi-Fi | Check `/lib/firmware/mrvl/sd8797_uapsta.bin` exists |
 | No touch | Verify I2C1 HID node in DTS; try `atmel_mxt_ts` driver |
 | Kernel panic on eMMC | Verify `cmdline.txt` has `root=/dev/mmcblk0p5`, verify ext4 on p5 |
+| SD card not detected | Ensure kernel is 5.17+ (early kernels used the SD slot as serial port). Check `dmesg \| grep mmc` |
+| 7-minute boot delay | Normal — Surface 2 UEFI `BootServices->LoadImage` bug for non-edk2 binaries. Cannot be bypassed. |
 
 ## Technical Notes
 
 **Why `cmdline.txt`?** The Yahallo EFI Shell does not pass command-line arguments to the kernel via `loaded_image->load_options`. The grate-linux `CONFIG_CMDLINE_FROM_FILE=y` reads `cmdline.txt` from the FAT partition and injects the parameters.
 
-**Why no `initrd=`?** Adding `initrd=` to cmdline.txt causes a black screen with the pre-built kernel. The exact cause is unconfirmed but likely related to EFI stub memory allocation conflicting with the framebuffer.
+**Why no `initrd=`?** The SD card approach uses built-in MMC/SDHCI drivers, so no initramfs is needed. Previous attempts with `initrd=` for USB boot failed — the initramfs never loaded (kernel panicked on `root=/dev/ram0` with `unknown-block(0,0)`), likely because the EFI stub doesn't process `initrd=` from `CONFIG_CMDLINE_FROM_FILE`.
 
 **Kernel config fragment:** `configs/surface2_defconfig_fragment` — applied on top of `tegra_defconfig`.
 

@@ -54,7 +54,7 @@ cmd_prebuilt() {
     rm -rf "$BOOT_DIR" "$STAGING_DIR"
     mkdir -p "$BOOT_DIR" "$STAGING_DIR"
     download_prebuilt
-    build_initramfs
+    # build_initramfs  # Not needed for SD card boot (MMC drivers built-in)
     assemble_boot
     copy_firmware
     verify_output || true
@@ -106,7 +106,7 @@ cmd_full() {
     install_modules
     copy_kernel_efi
     build_dtb
-    build_initramfs
+    # build_initramfs  # Not needed for SD card boot (MMC drivers built-in)
     assemble_boot
     copy_firmware
     verify_output || true
